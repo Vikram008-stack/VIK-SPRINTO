@@ -1,0 +1,130 @@
+# ICP qualification rubric v1 (locked). Python computes the final score and decision from this file.
+# The model only extracts evidence and proposes scores; if it disagrees, Python wins and the diff is logged.
+rubric_version: v1
+
+components:
+  saas_fit:
+    max: 25
+    buckets:
+      cloud_subscription: 25     # cloud subscription software
+      hybrid: 15                 # software product + services
+      dev_shop: 5                # project-based development
+      it_services: 0             # IT consultancy, staffing, agency, outsourcing
+      non_software: 0
+    notes:
+      - internal-use software is not SaaS
+      - marketplaces are not automatically SaaS; check what customers pay for
+      - no working product = not full points
+
+  compliance_trigger:
+    max: 40
+    strongest_only: true         # score the single strongest VERIFIED trigger; no double counting
+    buckets:
+      explicit_audit_target: 40       # explicit upcoming SOC 2 / ISO 27001 audit or certification target
+      customer_requires_cert: 40      # enterprise customer explicitly requires certification
+      stated_deadline: 35             # publicly stated compliance deadline / audit prep
+      grc_leader_hire: 25             # hiring dedicated compliance / GRC / security leader
+      procurement_questionnaire: 25   # public enterprise procurement / security-questionnaire requirements
+      enterprise_expansion: 20        # expanding to enterprise with identifiable security requirements
+      trust_page_no_need: 10          # security/trust page exists, no current need (incl. security-engineer hire)
+      generic_mention: 5              # generic GDPR / SOC 2 / ISO mention
+      none: 0
+
+  stage:
+    max: 15
+    buckets:
+      series_a_c: 15
+      seed_traction: 10
+      bootstrapped_traction: 10
+      series_d_plus: 8
+      pre_seed_launched: 5
+      unknown: 5
+      pre_product: 0
+
+  enterprise:
+    max: 10
+    buckets:
+      explicit_enterprise: 10
+      b2b_midmarket: 7
+      b2b_unclear: 4
+      b2c: 2
+      none: 0
+
+  recency:
+    max: 10
+    # uses event_date of the scored trigger, never the crawl date
+    bands_days: [[90, 10], [180, 7], [365, 4]]
+    older: 1
+    undated: 0
+
+decision:
+  qualified:
+    min_score: 75
+    min_saas_fit: 15
+    min_trigger: 20
+    min_trigger_quality: MEDIUM   # the scored trigger must be MEDIUM or STRONG and carry a source_url
+  needs_research_band: [50, 74]
+  reject_below: 50
+
+hard_disqualifiers:             # override the score
+  - not_operating
+  - not_software
+  - wrong_entity
+  - duplicate
+  - closed_or_discontinued
+
+not_disqualifiers:              # missing info or context, never a reason to reject
+  - no_funding_info
+  - no_employee_count
+  - no_public_compliance_requirement
+  - bootstrapped
+  - series_d_plus
+  - already_certified          # handled by qualification.already_certified_policy (default: research)
+
+evidence_quality:
+  STRONG:
+    - official announcement of audit prep
+    - named enterprise customer explicitly requiring certification
+  MEDIUM:
+    - current GRC / compliance job listing
+    - reputable news on enterprise expansion
+  WEAK:
+    - generic security language
+    - undated blog post mentioning SOC 2
+  UNACCEPTABLE:
+    - AI assumption without a source (zero points, rejected by validator)
+
+# Evidence Map: drives the agent loop. "sufficient_when" keys are implemented as pure-Python checks
+# in src/qualify/sufficiency.py; the model is never asked whether it has enough.
+evidence_map:
+  - id: already_certified
+    question: Already certified?
+    sources: [/security, /trust, homepage]
+    fetch_limit: 1
+    sufficient_when: cert_named_or_security_page_seen
+    if_unanswered: treat_not_certified_and_flag
+    short_circuit: already_certified_policy
+
+  - id: b2b_saas
+    question: B2B SaaS?
+    sources: [homepage, /product, /solutions, /about]
+    fetch_limit: 1
+    sufficient_when: buyer_and_model_known
+    if_unanswered: manual_review
+    short_circuit: reject_if_not_software
+
+  - id: stage
+    question: Right stage?
+    sources: [/careers, /jobs, /pricing, /customers]
+    fetch_limit: 2
+    sufficient_when: funding_or_roles_or_enterprise_tier
+    if_unanswered: qualify_lower_rank_flagged
+    short_circuit: none
+
+  - id: trigger
+    question: Compliance trigger?
+    sources: [/careers, /jobs, /security, /trust, /blog, /news, search]
+    fetch_limit: 2
+    sufficient_when: dated_sourced_trigger_ge_20
+    if_unanswered: needs_research_flag
+    short_circuit: early_stop_at_40

@@ -1,0 +1,12 @@
+[project]
+name = "sprinto-outreach"
+version = "0.1.0"
+description = "Evidence-first cold-outreach pipeline for Sprinto (MESA Cohort 4, Term 2, Build 2)"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q -m 'not live'"
+markers = [
+    "live: calls real external APIs (skipped by default; run with -m live)",
+]

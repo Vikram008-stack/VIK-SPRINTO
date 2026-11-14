@@ -1,0 +1,9 @@
+# Option B fallback: used when Hunter is exhausted, errors, or returns no suitable person.
+# Fill by hand from a source you can defend (e.g. Apollo). The report labels the contact's source.
+# Format:
+# example.com:
+#   name: "Jane Doe"
+#   title: "Head of Security"
+#   email: "jane@example.com"
+#   source: apollo_manual
+{}

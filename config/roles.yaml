@@ -1,0 +1,66 @@
+# Decision-maker ranking (deterministic). Hunter finds people; this file decides who.
+# Matching is case-insensitive substring on the Hunter "position" field.
+version: v1
+
+tiers:
+  1:  # owns security & audit evidence
+    - ciso
+    - chief information security officer
+    - chief security officer
+    - head of security
+    - vp security
+    - vp of security
+    - director of security
+    - head of information security
+  2:  # owns compliance programme
+    - head of compliance
+    - compliance manager
+    - compliance lead
+    - grc
+    - governance, risk
+    - risk and compliance
+    - risk & compliance
+  3:  # owns engineering / IT
+    - cto
+    - chief technology officer
+    - vp engineering
+    - vp of engineering
+    - head of engineering
+    - head of it
+    - it director
+    - head of infrastructure
+  4:  # owns the company
+    - founder
+    - co-founder
+    - cofounder
+    - ceo
+    - chief executive officer
+
+small_company:
+  max_employees: 50          # at or below this, founders/CEO/CTO own compliance
+  promote_to_tier: 1
+  promote: [founder, co-founder, cofounder, ceo, chief executive officer, cto, chief technology officer]
+
+# Titles containing these are penalised even if they also contain "head" or "manager".
+penalise:
+  - sales
+  - marketing
+  - hr
+  - human resources
+  - people
+  - recruit
+  - talent
+  - finance
+  - growth
+  - partnership
+  - customer success
+  - account executive
+  - business development
+
+# Applied in this order after tier.
+tie_break:
+  - hunter_confidence
+  - verification_status       # valid > accept_all > unknown > invalid
+  - seniority                 # executive > senior > junior
+
+min_confidence: 70           # below this the contact is skipped

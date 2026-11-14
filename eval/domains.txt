@@ -1,0 +1,11 @@
+# Evaluation set (Addendum D). Replace the thin-signal placeholder before milestone 11.
+chargebee.com
+thoughtworks.com
+tcs.com
+duolingo.com
+getlago.com
+cal.com
+twenty.com
+documenso.com
+# <USER_THIN_PICK>
+[www.cal.com](https://www.cal.com)

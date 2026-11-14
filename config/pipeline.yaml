@@ -1,0 +1,85 @@
+# Sprinto outreach pipeline - runtime config.
+# Every cap here is enforced in code and logged. Change values, not code.
+version: 1
+
+run:
+  concurrency: 3                 # companies processed in parallel; Hunter + Gmail calls are serialised
+  max_cost_usd_per_company: 0.05 # breach -> INSUFFICIENT_DATA, reason budget_exceeded
+  max_seconds_per_company: 120   # matches the under-2-minute design target
+  per_domain_delay_s: 2.0        # politeness delay between fetches to the same domain
+
+scrape:
+  provider: scrapingbee
+  cache_ttl_days: 7              # never refetch the same URL inside this window
+  max_fetches_per_company: 5     # homepage + up to 4 (includes loop fetches)
+  js_escalation_min_words: 200   # cleaned text below this -> retry with render_js=true
+  timeout_s: 30
+  respect_robots: true
+  robots_user_agent: "*"         # robots.txt group we honour (ScrapingBee does not identify us)
+  credits:                       # verified against ScrapingBee docs at milestone 2
+    plain: 1
+    js: 5
+
+cleaner:
+  max_tokens_per_group: 2000     # token estimate = chars / 4
+  min_line_words: 8              # shorter lines dropped unless they are headings
+
+llm:
+  provider: gemini
+  # Model names change; confirmed against the live API at milestone 3.
+  models:
+    extract: gemini-3.6-flash    # cheapest tier: extraction + loop re-extraction
+    qualify: gemini-3.6-flash    # stronger tier picked at milestone 3
+    pain: gemini-3.6-flash
+    draft: gemini-3.6-flash
+  max_retries: 2
+  timeout_s: 60
+  # USD per 1M tokens. Left empty on purpose: unknown price -> cost recorded as null, never guessed.
+  pricing_usd_per_1m: {}
+  prompt_versions:
+    extract: v1
+    qualify: v1
+    pain: v1
+    draft: v1
+
+search:
+  provider: gemini_grounded      # gemini_grounded | serper
+  max_searches_per_company: 3
+  cache_ttl_days: 7
+
+hunter:
+  mode: mock                     # mock | live ; live also requires the --live-hunter CLI flag
+  monthly_budget: 25
+  hard_stop: 20                  # refuse live searches beyond this (5 kept for emergencies)
+  verifier: true                 # Email Verifier on the chosen contact only, if credits remain
+  verifier_monthly_budget: 50
+  min_confidence: 70
+  results_limit: 10
+  # Parameter names/values confirmed against Hunter docs at milestone 6.
+  filters:
+    department: [executive, it, management]
+    seniority: [senior, executive]
+    type: personal
+  allow_role_mailbox_fallback: false
+
+contacts:
+  manual_contacts_file: config/manual_contacts.yaml
+
+qualification:
+  already_certified_policy: research   # research (rubric v1) | disqualify (stricter L4 slide variant)
+  max_extra_rounds: 2
+
+email:
+  mode: dry_run                  # dry_run | send ; send also requires the --send CLI flag
+  max_words: 120
+  guardrail_max_attempts: 2
+  sender_name: "Vikram"
+  sprinto_context: >-
+    Sprinto automates SOC 2, ISO 27001 and GDPR readiness and audits for SaaS teams:
+    continuous control monitoring, evidence collection and auditor-ready reporting.
+
+paths:
+  db: data/outreach.db
+  cache: data/cache
+  logs: data/logs
+  reports: reports
