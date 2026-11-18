@@ -6,3 +6,5 @@ __pycache__/
 data/
 reports/*
 !reports/.gitkeep
+.vercel
+.env.local
