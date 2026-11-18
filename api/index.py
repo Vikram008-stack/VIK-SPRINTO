@@ -28,7 +28,7 @@ if str(ROOT) not in sys.path:
 from fastapi import Body, FastAPI, Request  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 
-from src.common.config import load_settings  # noqa: E402
+from src.common.config import is_serverless, load_settings  # noqa: E402
 from src.common.domains import InvalidDomain, normalise_domain, parse_domains  # noqa: E402
 from src.common.safety import UnsafeRecipientError, demo_recipient  # noqa: E402
 
@@ -222,7 +222,7 @@ def demo():
     return {"today": pipe.today.isoformat(), "outcomes": [_json.loads(o.to_json()) for o in outs]}
 
 
-if os.getenv("VERCEL"):
+if is_serverless():
     @app.api_route("/{full_path:path}", methods=["GET", "POST"])
     def not_found(full_path: str, request: Request):
         return _err(404, "not_found", f"No API route for /{full_path}",
@@ -231,6 +231,6 @@ if os.getenv("VERCEL"):
                                                          and "cookie" not in k})
 
 # Local development: serve the UI from public/ (on Vercel, public/ is served statically).
-if not os.getenv("VERCEL"):
+if not is_serverless():
     from fastapi.staticfiles import StaticFiles
     app.mount("/", StaticFiles(directory=str(ROOT / "public"), html=True), name="public")

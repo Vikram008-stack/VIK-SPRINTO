@@ -17,6 +17,14 @@ ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = ROOT / "config"
 
 
+def is_serverless() -> bool:
+    """True on Vercel/Lambda (env markers) or whenever the code directory is read-only."""
+    if any(os.getenv(k) for k in ("VERCEL", "VERCEL_ENV", "VERCEL_URL", "AWS_LAMBDA_FUNCTION_NAME",
+                                  "LAMBDA_TASK_ROOT")):
+        return True
+    return not os.access(ROOT, os.W_OK)
+
+
 class _Cfg(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -134,7 +142,7 @@ class PathsCfg(_Cfg):
         if p.is_absolute():
             return p
         # Serverless (Vercel): the code directory is read-only; write under /tmp (or SPRINTO_DATA_DIR)
-        data_dir = os.getenv("SPRINTO_DATA_DIR") or ("/tmp/sprinto" if os.getenv("VERCEL") else None)
+        data_dir = os.getenv("SPRINTO_DATA_DIR") or ("/tmp/sprinto" if is_serverless() else None)
         if data_dir:
             parts = p.parts[1:] if p.parts and p.parts[0] == "data" else p.parts
             return Path(data_dir).joinpath(*parts)
