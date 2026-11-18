@@ -222,6 +222,14 @@ def demo():
     return {"today": pipe.today.isoformat(), "outcomes": [_json.loads(o.to_json()) for o in outs]}
 
 
+if os.getenv("VERCEL"):
+    @app.api_route("/{full_path:path}", methods=["GET", "POST"])
+    def not_found(full_path: str, request: Request):
+        return _err(404, "not_found", f"No API route for /{full_path}",
+                    seen_path=request.url.path, headers={k: v for k, v in request.headers.items()
+                                                         if k.startswith("x-") and "auth" not in k
+                                                         and "cookie" not in k})
+
 # Local development: serve the UI from public/ (on Vercel, public/ is served statically).
 if not os.getenv("VERCEL"):
     from fastapi.staticfiles import StaticFiles
