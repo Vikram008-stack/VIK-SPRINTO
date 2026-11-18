@@ -9,13 +9,33 @@ review console for the Growth Lead.
 
 ---
 
+## Web app (live link)
+
+`public/` (UI) + `api/index.py` (FastAPI, Vercel serverless). Paste domains -> each company runs through the full
+pipeline in its own request (max 10 per batch, 2 in parallel) -> results land in the review desk as they finish.
+Buttons: **Research these companies**, **Load example**, **Upload .txt/.csv**, **Run offline demo** (zero API calls),
+**Download results (JSON)**, **Download summary (CSV)**, and **Send to my demo inbox** on drafts that pass guardrails.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/health` | which services are configured (booleans only), models, limits |
+| `POST /api/parse` `{text}` | normalise + dedupe + validate input (empty, invalid, duplicate, too many, too large) |
+| `POST /api/process` `{domain}` | full pipeline for one company (dry run), returns the outcome JSON |
+| `POST /api/send` `{outcome}` | re-runs guardrails, sends ONLY to `DEMO_RECIPIENT_EMAIL` (10/hour cap) |
+| `POST /api/demo` | offline demo world |
+
+Vercel env vars: `GEMINI_API_KEY`, `SCRAPINGBEE_API_KEY`, `HUNTER_API_KEY`, `DEMO_RECIPIENT_EMAIL`,
+`SPRINTO_HUNTER_LIVE=1` (live Hunter, guarded by Hunter's own account counter, hard stop 20), and optionally
+`GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` / `GMAIL_REFRESH_TOKEN` (from `python -m src.cli gmail-auth`).
+Run locally: `.venv\Scripts\python -m uvicorn api.index:app --port 8766` and open http://127.0.0.1:8766.
+
 ## Quick start (Windows)
 
 ```
 cd sprinto-outreach
 python -m venv .venv
-.venv\Scripts\python -m pip install -r requirements.txt
-.venv\Scripts\python -m pytest                     # 132 offline tests, zero API calls
+.venv\Scripts\python -m pip install -r requirements-dev.txt
+.venv\Scripts\python -m pytest                     # 148 offline tests, zero API calls
 .venv\Scripts\python -m src.cli demo               # FULL pipeline offline (fixtures), builds the console
 start reports\console.html                          # open the review console
 ```
@@ -151,9 +171,10 @@ predictions with `frozen: false`; review and freeze it before the first eval run
 
 ## Known limitations
 
-- No live run has been executed yet in this repo (no keys were configured). The offline demo and 132 tests exercise
-  every step with fixtures and recorded model responses; live Gemini/ScrapingBee/Hunter/Gmail behaviour still needs
-  one supervised run (Hunter: max 4 live calls for fixtures, 6 for the eval).
+- Live run 2026-11-18 on the eval list (free-tier Gemini key): all 9 inputs got the expected verdict (draft
+  expectations, not yet frozen), but no company QUALIFIED, so steps 4-7 ran live only up to the gate; the offline demo
+  and 148 tests exercise them with fixtures. Overloaded models (gemini-3.6-flash 503/504) stalled one company for 3
+  minutes, fixed with a 25 s timeout, one retry and a fallback model.
 - The likely eval list produces few QUALIFIED companies (several are already certified -> NEEDS_RESEARCH under
   policy `research`); include at least one likely fit as the thin pick to exercise steps 4-7 live.
 - Gemini 3 grounded search needs a paid-tier key; without it search degrades to company pages (`search_unavailable`).

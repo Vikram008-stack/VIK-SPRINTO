@@ -126,7 +126,7 @@ class BaseLlm:
                 if attempt < self.cfg.max_retries:
                     self.sleep(2 ** attempt)
         reason = ReasonCode.LLM_TIMEOUT if last and "timeout" in str(last).lower() else ReasonCode.LLM_ERROR
-        raise LlmError(reason, str(last))
+        raise LlmError(reason, f"transient after {self.cfg.max_retries + 1} attempts: {last}")
 
     # ------------------------------------------------------------------ public
     def generate_json(self, ctx: CallCtx, task: str, system: str, user: str, schema: Type[T]) -> LlmResult:
@@ -148,7 +148,17 @@ class BaseLlm:
         parsed = None
         raw: Optional[RawCall] = None
         for schema_attempt in range(2):   # original + ONE corrective retry
-            raw = self._with_retries(lambda: self._call_json(model, system, prompt, schema))
+            try:
+                raw = self._with_retries(lambda: self._call_json(model, system, prompt, schema))
+            except LlmError as e:
+                fb = self.cfg.fallback_model
+                if e.reason not in (ReasonCode.LLM_ERROR, ReasonCode.LLM_TIMEOUT) or not fb or fb == model \
+                        or "transient" not in e.detail:
+                    raise
+                log.warning("model overloaded; using fallback", extra={"domain": ctx.domain, "task": task,
+                                                                       "model": model, "fallback": fb})
+                model = fb
+                raw = self._with_retries(lambda: self._call_json(model, system, prompt, schema))
             in_total += raw.input_tokens
             out_total += raw.output_tokens
             try:

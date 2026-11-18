@@ -71,6 +71,18 @@ class HunterClient:
                         " fetched_at) VALUES (?,?,?,?,?)",
                         (domain, endpoint, ph, json.dumps(data), datetime.now(timezone.utc).isoformat()))
 
+    def account_searches_used(self) -> Optional[int]:
+        """Hunter /v2/account (does not consume credits). None if unavailable."""
+        try:
+            r = self.http.get(f"{self.BASE}/account", params={"api_key": self.api_key})
+            if r.status_code != 200:
+                return None
+            req = (r.json().get("data") or {}).get("requests") or {}
+            used = (req.get("searches") or {}).get("used")
+            return int(used) if used is not None else None
+        except Exception:
+            return None
+
     def domain_search(self, domain: str, refresh: bool = False) -> dict:
         params = self._params(domain)
         if not refresh:
@@ -88,6 +100,13 @@ class HunterClient:
             return data
         if not self.api_key:
             raise HunterError(ReasonCode.HUNTER_ERROR, "HUNTER_API_KEY not set")
+        # Authoritative guard: Hunter's own account counter (free call). Works on serverless, where the local
+        # SQLite counter does not persist between instances.
+        acct_used = self.account_searches_used()
+        if acct_used is not None and acct_used >= self.cfg.hard_stop:
+            raise HunterError(ReasonCode.HUNTER_QUOTA_EXHAUSTED,
+                              f"Hunter account shows {acct_used} searches used this period; hard stop is "
+                              f"{self.cfg.hard_stop}. Refusing live call (use config/manual_contacts.yaml).")
         try:
             used = self.db.reserve_hunter_call("search", self.cfg.hard_stop)
         except HunterQuotaExceeded as e:

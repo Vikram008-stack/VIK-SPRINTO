@@ -57,6 +57,7 @@ class LlmCfg(_Cfg):
     provider: Literal["gemini"] = "gemini"
     models: dict[Literal["extract", "qualify", "pain", "draft", "search"], str]
     thinking_level: Optional[str] = None
+    fallback_model: Optional[str] = None
     temperature: float = 0.2
     max_retries: int = Field(2, ge=0, le=2)
     timeout_s: int = 60
@@ -130,7 +131,14 @@ class PathsCfg(_Cfg):
 
     def abs(self, name: str) -> Path:
         p = Path(getattr(self, name))
-        return p if p.is_absolute() else ROOT / p
+        if p.is_absolute():
+            return p
+        # Serverless (Vercel): the code directory is read-only; write under /tmp (or SPRINTO_DATA_DIR)
+        data_dir = os.getenv("SPRINTO_DATA_DIR") or ("/tmp/sprinto" if os.getenv("VERCEL") else None)
+        if data_dir:
+            parts = p.parts[1:] if p.parts and p.parts[0] == "data" else p.parts
+            return Path(data_dir).joinpath(*parts)
+        return ROOT / p
 
 
 class PipelineCfg(_Cfg):

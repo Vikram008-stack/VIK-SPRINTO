@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sprinto Outreach Desk</title>
+<meta name="description" content="Evidence-first cold outreach for Sprinto: qualify SaaS companies, find the decision-maker, draft a sourced email.">
+<link rel="stylesheet" href="desk.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><div class="mark" aria-hidden="true">S</div>
+      <div><h1>Sprinto Outreach Desk</h1><p id="sub">Evidence-first prospecting for SOC 2 / ISO 27001 / GDPR automation</p></div></div>
+    <div class="meta"><span class="tag safe">Demo-safe: emails only reach the demo inbox</span>
+      <span class="tag" id="svc">checking services…</span>
+      <button class="theme" id="theme" type="button">Theme</button></div>
+  </header>
+
+  <section class="intake" aria-labelledby="intake-h">
+    <h2 id="intake-h">Which companies should we look at?</h2>
+    <p class="lead">Paste company domains, one per line (or comma separated, or upload a .txt / .csv). For each one the desk reads
+      the public website, scores it against Sprinto's ICP rubric with every point linked to a source, picks the right
+      decision-maker, and drafts a short email built only on evidence it found. Up to <span id="maxd">10</span> per batch.</p>
+    <label for="domains" class="small">Company domains</label>
+    <textarea id="domains" spellcheck="false" placeholder="acme.com&#10;https://www.example-saas.io/&#10;another-company.com"></textarea>
+    <div class="controls">
+      <button class="btn primary" type="button" id="run">Research these companies</button>
+      <button class="btn" type="button" id="example">Load example</button>
+      <label class="file btn" for="file">Upload .txt / .csv<input id="file" type="file" accept=".txt,.csv,text/plain,text/csv" hidden></label>
+      <button class="btn" type="button" id="demo" title="Fictional fixture companies, recorded model output: zero API calls">Run offline demo</button>
+      <span style="flex:1"></span>
+      <button class="btn" type="button" id="dl-json" disabled>Download results (JSON)</button>
+      <button class="btn" type="button" id="dl-csv" disabled>Download summary (CSV)</button>
+    </div>
+    <div class="progress" id="progress"><div></div></div>
+    <div class="notice" id="notice" role="status"></div>
+  </section>
+
+  <section class="cards" id="cards" aria-label="Summary"></section>
+  <div class="layout">
+    <nav class="list" aria-label="Companies">
+      <div class="search"><input id="q" type="search" placeholder="Search companies" aria-label="Search companies"></div>
+      <div id="items"></div>
+    </nav>
+    <main class="detail" id="detail" aria-live="polite"></main>
+  </div>
+  <footer>Every point links to its source. Nothing is guessed: missing facts stay empty and are routed to a human.
+    Emails go only to the demo inbox. Keys: <span class="kbd">j</span>/<span class="kbd">k</span> next/previous,
+    <span class="kbd">/</span> search.</footer>
+</div>
+<script src="desk.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

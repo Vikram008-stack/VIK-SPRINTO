@@ -237,6 +237,23 @@ def scrape_demo(domains: list[str] = typer.Argument(None),
     console.print(t)
 
 
+@app.command("gmail-auth")
+def gmail_auth() -> None:
+    """One-time Gmail consent (opens your browser). Saves a refresh token to GMAIL_TOKEN_FILE (gitignored)."""
+    from src.mail.gmail_sender import run_oauth_flow
+    s = load_settings()
+    secret = s.secrets.gmail_client_secret_file or "data/secrets/client_secret.json"
+    token = s.secrets.gmail_token_file or "data/secrets/token.json"
+    secret_p = Path(secret) if Path(secret).is_absolute() else ROOT / secret
+    token_p = Path(token) if Path(token).is_absolute() else ROOT / token
+    if not secret_p.exists():
+        console.print(f"[red]Put your Google OAuth 'Desktop app' client JSON at {secret_p} first.[/red]")
+        raise typer.Exit(2)
+    out = run_oauth_flow(str(secret_p), str(token_p))
+    console.print(f"Saved Gmail token to {out}. For Vercel, copy client_id, client_secret and refresh_token from it "
+                  f"into GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET / GMAIL_REFRESH_TOKEN.")
+
+
 @app.command()
 def check() -> None:
     """Validate config files and show which secrets are set (values never shown)."""

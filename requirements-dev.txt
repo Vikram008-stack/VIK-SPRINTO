@@ -1,0 +1,7 @@
+# Local CLI, tests and one-time Gmail consent
+-r requirements.txt
+typer>=0.12
+rich>=13.7
+uvicorn>=0.29
+pytest>=8.2
+google-auth-oauthlib>=1.2

@@ -1,0 +1,6 @@
+.env
+.venv
+data
+reports
+.pytest_cache
+**/__pycache__

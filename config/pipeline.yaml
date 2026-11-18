@@ -31,20 +31,23 @@ llm:
   # Model ids + prices checked on aistudio.google.com/docs/pricing on 2026-11-14.
   models:
     extract: gemini-3.1-flash-lite   # cheapest Gemini 3 tier: extraction + loop re-extraction
-    qualify: gemini-3.6-flash        # stronger tier: qualification judgement, pain points, drafting
-    pain: gemini-3.6-flash
-    draft: gemini-3.6-flash
-    search: gemini-3.6-flash         # grounded Google Search (needs a paid-tier key for Gemini 3)
+    # 2026-11-18: gemini-3.6-flash returned 503/504 (overloaded) in the live smoke test -> 3.8-flash, same price
+    qualify: gemini-3.5-flash-lite   # advisory score proposal only (Python decides): fast + reliable
+    pain: gemini-3.8-flash
+    draft: gemini-3.8-flash
+    search: gemini-3.8-flash         # grounded Google Search (needs a paid-tier key for Gemini 3)
+  fallback_model: gemini-3.5-flash-lite   # used once if the task model stays overloaded after retries
   thinking_level: null               # leave null unless the model documents thinking_level
   temperature: 0.2
-  max_retries: 2
-  timeout_s: 60
+  max_retries: 1                     # one retry, then the fallback model (live: overloaded models stalled 3 min)
+  timeout_s: 25
   # USD per 1M tokens (paid tier). Unknown model -> cost recorded as null, never guessed.
   # NOTE gemini-3.6-flash doubles to $1.50/$7.50 on 2027-01-01.
   pricing_usd_per_1m:
     gemini-3.1-flash-lite: {input: 0.25, output: 1.50}
     gemini-3.6-flash: {input: 0.75, output: 3.75}
     gemini-3.8-flash: {input: 0.75, output: 3.75}
+    gemini-3.5-flash-lite: {input: 0.30, output: 2.50}
     gemini-4-hydrogen: {input: 1.50, output: 7.50}
   # Grounding: first 5,000 grounded requests/month free on paid tier, then $14 / 1,000 ($0.014 each).
   # Marginal cost inside the free allowance is 0; set to 0.014 to budget conservatively.

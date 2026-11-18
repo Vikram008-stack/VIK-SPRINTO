@@ -76,6 +76,7 @@ class CachedSearch:
         self.max = max_per_company
         self.used: dict[str, int] = {}
         self.name = inner.name
+        self.disabled_reason: Optional[str] = None     # circuit breaker: quota/auth errors stop search for the run
 
     def remaining(self, domain: str) -> int:
         return max(0, self.max - self.used.get(domain, 0))
@@ -86,10 +87,19 @@ class CachedSearch:
                           (domain, key, self.inner.name))
         if row and datetime.now(timezone.utc) - datetime.fromisoformat(row["fetched_at"]) <= self.ttl:
             return SearchResult.from_json(row["response_json"])
+        if self.disabled_reason:
+            raise SearchUnavailable(f"search disabled for this run: {self.disabled_reason}")
         if self.remaining(domain) <= 0:
             raise SearchUnavailable(f"search cap {self.max} reached for {domain}")
         self.used[domain] = self.used.get(domain, 0) + 1
-        res = self.inner.search(ctx, domain, company, focus)
+        try:
+            res = self.inner.search(ctx, domain, company, focus)
+        except SearchUnavailable as e:
+            text = str(e)
+            if any(k in text for k in ("429", "RESOURCE_EXHAUSTED", "quota", "401", "403", "PERMISSION")):
+                self.disabled_reason = "provider quota/permission error (" + text[:80] + ")"
+                log.warning("search disabled for the rest of the run", extra={"reason": self.disabled_reason})
+            raise
         self.db.execute("INSERT OR REPLACE INTO search_cache (domain, query, provider, response_json, fetched_at)"
                         " VALUES (?,?,?,?,?)",
                         (domain, key, self.inner.name, res.to_json(), datetime.now(timezone.utc).isoformat()))

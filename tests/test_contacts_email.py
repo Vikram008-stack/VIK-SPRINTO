@@ -86,9 +86,33 @@ def test_hunter_live_caches_full_response(db):
     h = HunterClient(cfg, db, api_key="k", live_enabled=True, http=Http())
     h.domain_search("ledgerly.io")
     h.domain_search("ledgerly.io")
-    assert len(calls) == 1                                       # second call served from cache
+    searches = [c for c in calls if "domain" in c]
+    assert len(searches) == 1                                    # second call served from cache
     assert db.hunter_usage()["searches_used"] == 1
-    assert calls[0]["type"] == "personal" and "executive" in calls[0]["seniority"]
+    assert searches[0]["type"] == "personal" and "executive" in searches[0]["seniority"]
+
+
+def test_hunter_account_counter_blocks_live_call(db):
+    """On serverless the local counter resets; Hunter's own account counter is the authoritative guard."""
+    cfg = S.pipeline.hunter.model_copy(update={"mode": "live", "hard_stop": 20})
+    calls = []
+
+    class Resp:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"data": {"requests": {"searches": {"used": 20, "available": 50}}}}
+
+    class Http:
+        def get(self, url, params):
+            calls.append(url)
+            return Resp()
+    h = HunterClient(cfg, db, api_key="k", live_enabled=True, http=Http())
+    with pytest.raises(HunterError) as e:
+        h.domain_search("acme.io")
+    assert e.value.reason.value == "hunter_quota_exhausted"
+    assert all(u.endswith("/account") for u in calls)            # never reached domain-search
 
 
 # ------------------------------------------------------------------ guardrails
