@@ -2,7 +2,7 @@
 (function () {
   const $ = id => document.getElementById(id);
   const EXAMPLE = ['chargebee.com', 'thoughtworks.com', 'documenso.com', 'www.cal.com', 'cal.com', 'not a domain'].join('\n');
-  const CONCURRENCY = 2;
+  const CONCURRENCY = 1;   // one company per request at a time: parallel heavy pages exhausted a serverless instance
   const TIMEOUT_MS = 295000;
   let running = false;
   let health = null;
@@ -82,7 +82,7 @@
     if (duplicates.length) msgs.push(`${duplicates.length} duplicate${duplicates.length > 1 ? 's' : ''} removed.`);
     if (!unique.length) { notice('warn', msgs.join(' ') || 'No valid domains to research.'); setBusy(false); return; }
     notice(msgs.length ? 'warn' : 'ok', (msgs.join(' ') + ` Researching ${unique.length} compan${unique.length > 1 ? 'ies' : 'y'}. ` +
-      'Each takes about 30-120 seconds; results appear as they finish.').trim());
+      'Companies are researched one at a time (about 15-90 seconds each); results appear as they finish.').trim());
     unique.forEach(u => Desk.upsert({ domain: u.domain, input_raw: u.raw, status: 'QUEUED', status_reason: 'Waiting for a free slot' }));
     setBusy(true);
     let done = 0; progress(0, unique.length);
@@ -91,7 +91,13 @@
       while (queue.length) {
         const u = queue.shift();
         Desk.upsert({ domain: u.domain, input_raw: u.raw, status: 'RUNNING' });
-        const r = await api('/api/process', { domain: u.raw }, TIMEOUT_MS);
+        let r = await api('/api/process', { domain: u.raw }, TIMEOUT_MS);
+        const transient = x => !x.ok && (!x.data || !x.data.outcome) && (x.status === 0 || x.status >= 500 ||
+          ['bad_response', 'network', 'timeout'].includes((x.data || {}).error));
+        if (transient(r)) {                     // one automatic retry for a dropped or timed-out request
+          Desk.upsert({ domain: u.domain, input_raw: u.raw, status: 'RUNNING', status_reason: 'Retrying once…' });
+          r = await api('/api/process', { domain: u.raw }, TIMEOUT_MS);
+        }
         let o;
         if (r.ok && r.data && r.data.status) o = r.data;
         else if (r.data && r.data.outcome) o = r.data.outcome;

@@ -51,6 +51,9 @@ DROP_TAGS = ["script", "style", "noscript", "svg", "iframe", "template", "canvas
              "audio", "form", "button", "select", "input", "textarea", "link", "meta"]
 
 
+MAX_HTML_CHARS = 1_500_000     # parse at most ~1.5 MB of HTML: huge pages exhausted serverless memory
+
+
 def estimate_tokens(text: str) -> int:
     return max(0, len(text) // 4)
 
@@ -103,7 +106,7 @@ def clean_html(html: str, source_url: str, fetched_at: datetime, page_type: Opti
                chunk_tokens: int = 300) -> CleanResult:
     html = html or ""
     raw_tokens = estimate_tokens(html)
-    soup = BeautifulSoup(html, "lxml")
+    soup = BeautifulSoup(html[:MAX_HTML_CHARS], "lxml")
     seen = seen if seen is not None else set()
 
     title = soup.title.get_text(" ", strip=True) if soup.title else None
@@ -251,7 +254,7 @@ def clean_html(html: str, source_url: str, fetched_at: datetime, page_type: Opti
 
 def visible_word_count(html: str) -> int:
     """Cheap word count of visible text, used by failure classification before full cleaning."""
-    soup = BeautifulSoup(html or "", "lxml")
+    soup = BeautifulSoup((html or "")[:MAX_HTML_CHARS], "lxml")
     for t in soup.find_all(["script", "style", "noscript", "template", "svg"]):
         t.decompose()
     return len((soup.body or soup).get_text(" ", strip=True).split())
