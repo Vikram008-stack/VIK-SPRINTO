@@ -3,7 +3,7 @@
 | Item | Link / location |
 |---|---|
 | Live app (Vercel) | https://sprinto-outreach-nu.vercel.app |
-| GitHub repo (public) | `https://github.com/<your-username>/sprinto-outreach` (fill in after pushing) |
+| GitHub repo (public) | https://github.com/vikramaditya-mesa/sprinto-outreach |
 | Demo video | (your recording link) |
 
 The live deployment is built from the same commits as the repo (`git archive HEAD` of `main`).
