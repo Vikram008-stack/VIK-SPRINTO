@@ -41,6 +41,25 @@ _lock = threading.Lock()
 app = FastAPI(title="Sprinto Outreach", version="1.0", docs_url="/api/docs", openapi_url="/api/openapi.json")
 
 
+class _VercelPathRestore:
+    """vercel.json rewrites /api/<route> to /api/index?__path=<route>; restore the original path for routing."""
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http" and scope.get("path") in ("/api/index", "/api/index.py", "/api"):
+            from urllib.parse import parse_qsl, urlencode
+            qs = parse_qsl(scope.get("query_string", b"").decode(), keep_blank_values=True)
+            route = next((v for k, v in qs if k == "__path"), None)
+            if route is not None:
+                scope = dict(scope)
+                scope["path"] = "/api/" + route.lstrip("/")
+                scope["raw_path"] = scope["path"].encode()
+                scope["query_string"] = urlencode([(k, v) for k, v in qs if k != "__path"]).encode()
+        await self.inner(scope, receive, send)
+
+
 def _err(status: int, code: str, message: str, **extra: Any) -> JSONResponse:
     return JSONResponse(status_code=status, content={"error": code, "message": message, **extra})
 
@@ -222,15 +241,14 @@ def demo():
     return {"today": pipe.today.isoformat(), "outcomes": [_json.loads(o.to_json()) for o in outs]}
 
 
-if is_serverless():
-    @app.api_route("/{full_path:path}", methods=["GET", "POST"])
-    def not_found(full_path: str, request: Request):
-        return _err(404, "not_found", f"No API route for /{full_path}",
-                    seen_path=request.url.path, headers={k: v for k, v in request.headers.items()
-                                                         if k.startswith("x-") and "auth" not in k
-                                                         and "cookie" not in k})
+@app.api_route("/api/{full_path:path}", methods=["GET", "POST"])
+def not_found(full_path: str):
+    return _err(404, "not_found", f"No API route for /api/{full_path}")
+
 
 # Local development: serve the UI from public/ (on Vercel, public/ is served statically).
 if not is_serverless():
     from fastapi.staticfiles import StaticFiles
     app.mount("/", StaticFiles(directory=str(ROOT / "public"), html=True), name="public")
+
+app = _VercelPathRestore(app)   # noqa: F811  (ASGI wrapper; routes are registered above)

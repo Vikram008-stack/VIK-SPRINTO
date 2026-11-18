@@ -7,5 +7,5 @@
       "includeFiles": "{src/**,config/**,tests/fixtures/**,public/desk.css,public/desk.js}"
     }
   },
-  "rewrites": [{ "source": "/api/(.*)", "destination": "/api/index" }]
+  "rewrites": [{ "source": "/api/(.*)", "destination": "/api/index?__path=$1" }]
 }
