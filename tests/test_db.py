@@ -86,3 +86,24 @@ def test_purge_contacts(db):
     db.insert("contacts", {"domain": "a.io", "role": "chosen", "name": "A B", "source": "fixture",
                            "created_at": "2026-11-14"})
     assert db.purge_contacts("a.io") == 1
+
+
+def test_concurrent_requests_share_one_file_lock(tmp_path):
+    """Regression (live, 2026-11-18): each web request builds its own Database on the same /tmp file;
+    parallel requests raised 'database is locked'. Separate objects must serialise writes per file."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from src.store.db import Database
+    path = tmp_path / "shared.db"
+
+    def request(i):
+        d = Database(path)          # one object per "request", like the API
+        d.init()
+        for j in range(25):
+            d.log_failure(Failure(domain=f"d{i}.io", step=Step.SCRAPE, reason=ReasonCode.TIMEOUT, detail=str(j)))
+            d.upsert_company(f"d{i}.io", f"d{i}.io", None)
+        return True
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        assert all(pool.map(request, range(8)))
+    assert Database(path).one("SELECT COUNT(*) c FROM failures")["c"] == 200

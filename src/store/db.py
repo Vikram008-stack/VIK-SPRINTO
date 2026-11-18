@@ -43,13 +43,30 @@ class HunterQuotaExceeded(RuntimeError):
     pass
 
 
+# One write lock (and one schema init) per database FILE per process. The web app builds a new Database object per
+# request, and serverless platforms run several requests in one process: per-object locks let two requests write at
+# once and SQLite answered "database is locked" (seen live on Vercel, 2026-11-18).
+_FILE_LOCKS: dict[str, threading.RLock] = {}
+_INITIALISED: set[str] = set()
+_REGISTRY_LOCK = threading.Lock()
+
+
+def _lock_for(path: str) -> threading.RLock:
+    with _REGISTRY_LOCK:
+        if path not in _FILE_LOCKS:
+            _FILE_LOCKS[path] = threading.RLock()
+        return _FILE_LOCKS[path]
+
+
 class Database:
     def __init__(self, path: Path | str):
         self.path = Path(path)
         if str(self.path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._write_lock = _lock_for(str(self.path.resolve()))
+        else:
+            self._write_lock = threading.RLock()
         self._local = threading.local()
-        self._write_lock = threading.RLock()
         self._memory_conn: Optional[sqlite3.Connection] = None
 
     # ------------------------------------------------------------ connections
@@ -68,15 +85,24 @@ class Database:
     def _connect(self) -> sqlite3.Connection:
         c = sqlite3.connect(str(self.path), timeout=30, check_same_thread=False, isolation_level=None)
         c.row_factory = sqlite3.Row
+        c.execute("PRAGMA busy_timeout = 30000")      # before anything that may need a lock
         c.execute("PRAGMA foreign_keys = ON")
         if str(self.path) != ":memory:":
-            c.execute("PRAGMA journal_mode = WAL")
-            c.execute("PRAGMA busy_timeout = 30000")
+            with self._write_lock:
+                try:
+                    c.execute("PRAGMA journal_mode = WAL")
+                except sqlite3.OperationalError:
+                    pass                               # keep the default journal; locking still serialises writes
         return c
 
     def init(self) -> None:
+        key = str(self.path.resolve()) if str(self.path) != ":memory:" else None
         with self._write_lock:
+            if key and key in _INITIALISED and self.path.exists():
+                return
             self.conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+            if key:
+                _INITIALISED.add(key)
 
     def close(self) -> None:
         c = getattr(self._local, "conn", None)

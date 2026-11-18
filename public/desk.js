@@ -196,8 +196,8 @@
       if (e.key==='/' && q){ e.preventDefault(); q.focus(); }
     });
     const th = document.getElementById('theme');
-    if (th) th.onclick = () => { const r = document.documentElement; const dark = matchMedia('(prefers-color-scheme: dark)').matches;
-      const cur = r.dataset.theme || (dark?'dark':'light'); r.dataset.theme = cur==='dark'?'light':'dark'; };
+    if (th) th.onclick = () => { const r = document.documentElement;
+      r.dataset.theme = r.dataset.theme === 'dark' ? 'light' : 'dark'; };
   }
   window.Desk = {
     init(payload, options) {
