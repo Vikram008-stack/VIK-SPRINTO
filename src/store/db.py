@@ -124,7 +124,11 @@ class Database:
 
     def one(self, sql: str, params: Iterable[Any] = ()) -> Optional[sqlite3.Row]:
         with self._write_lock:
-            return self.conn.execute(sql, tuple(params)).fetchone()
+            cur = self.conn.execute(sql, tuple(params))
+            try:
+                return cur.fetchone()
+            finally:
+                cur.close()     # finalise now: an open statement can hold a SQLite read lock
 
     def insert(self, table: str, row: dict[str, Any]) -> int:
         cols = list(row)

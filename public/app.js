@@ -24,7 +24,7 @@
       const r = await fetch(path, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json' },
         body: body ? JSON.stringify(body) : undefined, signal: ctl.signal });
       let data = null;
-      try { data = await r.json(); } catch (_) { data = { error: 'bad_response', message: `Server returned HTTP ${r.status}` }; }
+      try { data = await r.json(); } catch (_) { data = { error: r.status === 504 ? 'timeout' : 'bad_response', message: r.status === 504 ? 'The server took too long on this company (HTTP 504). Run it again.' : `Server returned HTTP ${r.status}` }; }
       return { ok: r.ok, status: r.status, data };
     } catch (e) {
       return { ok: false, status: 0, data: { error: e.name === 'AbortError' ? 'timeout' : 'network',

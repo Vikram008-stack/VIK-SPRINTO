@@ -34,6 +34,7 @@ from src.common.safety import UnsafeRecipientError, demo_recipient  # noqa: E402
 
 MAX_DOMAINS = int(os.getenv("SPRINTO_MAX_DOMAINS", "10"))
 MAX_INPUT_CHARS = 20000
+PROCESS_TIMEOUT_S = int(os.getenv("SPRINTO_PROCESS_TIMEOUT_S", "240"))   # below Vercel's 300 s function limit
 SEND_LIMIT = int(os.getenv("SPRINTO_SEND_LIMIT", "10"))     # per server instance, protects the demo inbox
 _sends: list[float] = []
 _lock = threading.Lock()
@@ -176,17 +177,42 @@ def process(payload: dict = Body(default={})):
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
     if _hunter_live(s):
         s.pipeline.hunter.mode = "live"
-    db = Database(s.pipeline.paths.abs("db"))
+    # Serverless: one SQLite file PER REQUEST. Concurrent requests share a process on Vercel and a shared file in
+    # /tmp locked up live; /tmp is ephemeral anyway and Hunter's quota is checked against Hunter's own counter.
+    if is_serverless():
+        db_path = s.pipeline.paths.abs("db").parent / "requests" / f"{run_id}.db"
+    else:
+        db_path = s.pipeline.paths.abs("db")
+    db = Database(db_path)
     db.init()
+    result: dict = {}
+
+    def _work():
+        try:
+            pipe = build_live(s, db, run_id, dry_run=True, live_hunter=_hunter_live(s),
+                              transport=None if s.secrets.scrapingbee_api_key else "direct", today=date.today())
+            outs = pipe.run([raw], RunOptions(dry_run=True, refresh=bool(payload.get("refresh"))))
+            import json as _json
+            result["outcome"] = _json.loads(outs[0].to_json())
+        except Exception as e:
+            result["outcome"] = _fail_outcome(domain, raw, "unexpected_error",
+                                              f"{type(e).__name__}: {str(e)[:200]}", step="pipeline")
+
+    t = threading.Thread(target=_work, daemon=True)
+    t.start()
+    t.join(PROCESS_TIMEOUT_S)
+    if t.is_alive():
+        return _fail_outcome(domain, raw, "timeout",
+                             f"Research took longer than {PROCESS_TIMEOUT_S} s and was stopped so the app stays "
+                             f"responsive. The site or an AI model was very slow; run this company again.",
+                             step="pipeline")
     try:
-        pipe = build_live(s, db, run_id, dry_run=True, live_hunter=_hunter_live(s),
-                          transport=None if s.secrets.scrapingbee_api_key else "direct", today=date.today())
-        outs = pipe.run([raw], RunOptions(dry_run=True, refresh=bool(payload.get("refresh"))))
-        o = outs[0]
-        import json as _json
-        return _json.loads(o.to_json())
-    except Exception as e:
-        return _fail_outcome(domain, raw, "unexpected_error", f"{type(e).__name__}: {str(e)[:200]}", step="pipeline")
+        db.close()
+        if is_serverless():
+            os.remove(db_path)
+    except OSError:
+        pass
+    return result.get("outcome") or _fail_outcome(domain, raw, "unexpected_error", "no result", step="pipeline")
 
 
 @app.post("/api/send")
