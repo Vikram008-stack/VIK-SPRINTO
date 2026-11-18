@@ -5,6 +5,8 @@ Evidence-first outbound pipeline for Sprinto (MESA Cohort 4, Term 2, Build 2).
 decision-maker, delivered **only to `DEMO_RECIPIENT_EMAIL`**, plus an audit trail that defends every decision and a
 review console for the Growth Lead.
 
+**Live app:** https://sprinto-outreach-nu.vercel.app · **Repo:** https://github.com/Vikram008-stack/VIK-SPRINTO
+
 > Ground rule: every answer must be defensible. Code decides sufficiency; the model judges. Missing = null.
 
 ---
