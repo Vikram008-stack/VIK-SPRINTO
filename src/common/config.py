@@ -38,6 +38,8 @@ class ScrapeCfg(_Cfg):
     respect_robots: bool = True
     robots_user_agent: str = "*"
     credits: dict[str, int] = Field(default_factory=lambda: {"plain": 1, "js": 5})
+    usd_per_credit: Optional[float] = None
+    transport: Literal["scrapingbee", "direct"] = "scrapingbee"
 
     @model_validator(mode="after")
     def _robots_on(self):
@@ -53,17 +55,28 @@ class CleanerCfg(_Cfg):
 
 class LlmCfg(_Cfg):
     provider: Literal["gemini"] = "gemini"
-    models: dict[Literal["extract", "qualify", "pain", "draft"], str]
+    models: dict[Literal["extract", "qualify", "pain", "draft", "search"], str]
+    thinking_level: Optional[str] = None
+    temperature: float = 0.2
     max_retries: int = Field(2, ge=0, le=2)
     timeout_s: int = 60
     pricing_usd_per_1m: dict[str, dict[Literal["input", "output"], float]] = Field(default_factory=dict)
+    grounding_usd_per_request: float = 0.0
     prompt_versions: dict[str, str]
+
+    def cost(self, model: str, input_tokens: int, output_tokens: int) -> Optional[float]:
+        """USD cost, or None if the model's price is not configured (never guessed)."""
+        p = self.pricing_usd_per_1m.get(model)
+        if not p:
+            return None
+        return (input_tokens * p["input"] + output_tokens * p["output"]) / 1_000_000
 
 
 class SearchCfg(_Cfg):
     provider: Literal["gemini_grounded", "serper"] = "gemini_grounded"
     max_searches_per_company: int = Field(3, ge=0, le=3)
     cache_ttl_days: int = 7
+    loop_may_search: bool = True
 
 
 class HunterFilters(_Cfg):
@@ -102,6 +115,8 @@ class QualificationCfg(_Cfg):
 class EmailCfg(_Cfg):
     mode: Literal["dry_run", "send"] = "dry_run"
     max_words: int = 120
+    word_tolerance: float = 0.10
+    max_em_dashes: int = 0
     guardrail_max_attempts: int = Field(2, ge=1, le=2)
     sender_name: str = ""
     sprinto_context: str

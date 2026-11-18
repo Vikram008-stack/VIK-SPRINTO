@@ -9,6 +9,7 @@ components:
       cloud_subscription: 25     # cloud subscription software
       hybrid: 15                 # software product + services
       dev_shop: 5                # project-based development
+      marketplace: 5             # not automatically SaaS; needs research on what customers pay for
       it_services: 0             # IT consultancy, staffing, agency, outsourcing
       non_software: 0
     notes:

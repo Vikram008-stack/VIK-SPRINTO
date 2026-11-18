@@ -63,7 +63,7 @@ class CompanyStatus(str, Enum):
 class FetchMode(str, Enum):
     PLAIN = "plain"      # ScrapingBee render_js=false
     JS = "js"            # ScrapingBee render_js=true
-    DIRECT = "direct"    # direct HTTP (robots.txt only)
+    DIRECT = "direct"    # direct HTTP: robots.txt, and the dev-only direct transport
     FIXTURE = "fixture"  # offline tests
 
 
@@ -114,6 +114,10 @@ class ReasonCode(str, Enum):
     UNSAFE_RECIPIENT = "unsafe_recipient"
     # catch-all (should be rare; always carries detail)
     UNEXPECTED_ERROR = "unexpected_error"
+    HOMEPAGE_UNUSABLE = "homepage_unusable"
+    PARKED_DOMAIN = "parked_domain"
+    SNIPPET_NOT_FOUND = "snippet_not_found"
+    NO_PAIN_EVIDENCE = "no_pain_evidence"
 
 
 class Step(str, Enum):
@@ -225,6 +229,7 @@ class CompanyFacts(_Model):
     has_enterprise_pricing_tier: Optional[bool] = None
     operating_status: Optional[Literal["operating", "closed", "discontinued", "pre_product", "stealth"]] = None
     acquired_by: Optional[str] = None
+    parent_company: Optional[str] = None
     compliance_signals: list[Signal] = Field(default_factory=list)
     enterprise_signals: list[Signal] = Field(default_factory=list)
     hiring_signals: list[HiringSignal] = Field(default_factory=list)
@@ -232,6 +237,8 @@ class CompanyFacts(_Model):
     extraction_notes: str = ""
     # provenance: field name -> source_url that supplied it
     field_sources: dict[str, str] = Field(default_factory=dict)
+    # scalar facts that two sources disagree on (e.g. funding stage) -> NEEDS_RESEARCH
+    conflicts: list[str] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- step 3: qualification

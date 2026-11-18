@@ -16,9 +16,11 @@ scrape:
   timeout_s: 30
   respect_robots: true
   robots_user_agent: "*"         # robots.txt group we honour (ScrapingBee does not identify us)
-  credits:                       # verified against ScrapingBee docs at milestone 2
+  credits:                       # ScrapingBee docs: render_js=true costs 5; classic (no JS) costs 1
     plain: 1
     js: 5
+  usd_per_credit: 0.000196       # ESTIMATE: Freelance plan $49 / 250k credits. Set to your plan.
+  transport: scrapingbee         # scrapingbee | direct (dev only: plain HTTP, 0 credits, robots still enforced)
 
 cleaner:
   max_tokens_per_group: 2000     # token estimate = chars / 4
@@ -26,19 +28,31 @@ cleaner:
 
 llm:
   provider: gemini
-  # Model names change; confirmed against the live API at milestone 3.
+  # Model ids + prices checked on aistudio.google.com/docs/pricing on 2026-11-14.
   models:
-    extract: gemini-3.6-flash    # cheapest tier: extraction + loop re-extraction
-    qualify: gemini-3.6-flash    # stronger tier picked at milestone 3
+    extract: gemini-3.1-flash-lite   # cheapest Gemini 3 tier: extraction + loop re-extraction
+    qualify: gemini-3.6-flash        # stronger tier: qualification judgement, pain points, drafting
     pain: gemini-3.6-flash
     draft: gemini-3.6-flash
+    search: gemini-3.6-flash         # grounded Google Search (needs a paid-tier key for Gemini 3)
+  thinking_level: null               # leave null unless the model documents thinking_level
+  temperature: 0.2
   max_retries: 2
   timeout_s: 60
-  # USD per 1M tokens. Left empty on purpose: unknown price -> cost recorded as null, never guessed.
-  pricing_usd_per_1m: {}
+  # USD per 1M tokens (paid tier). Unknown model -> cost recorded as null, never guessed.
+  # NOTE gemini-3.6-flash doubles to $1.50/$7.50 on 2027-01-01.
+  pricing_usd_per_1m:
+    gemini-3.1-flash-lite: {input: 0.25, output: 1.50}
+    gemini-3.6-flash: {input: 0.75, output: 3.75}
+    gemini-3.8-flash: {input: 0.75, output: 3.75}
+    gemini-4-hydrogen: {input: 1.50, output: 7.50}
+  # Grounding: first 5,000 grounded requests/month free on paid tier, then $14 / 1,000 ($0.014 each).
+  # Marginal cost inside the free allowance is 0; set to 0.014 to budget conservatively.
+  grounding_usd_per_request: 0.0
   prompt_versions:
     extract: v1
     qualify: v1
+    research: v1
     pain: v1
     draft: v1
 
@@ -46,6 +60,7 @@ search:
   provider: gemini_grounded      # gemini_grounded | serper
   max_searches_per_company: 3
   cache_ttl_days: 7
+  loop_may_search: true          # the qualification loop may spend 1 of the 3 searches on the trigger row
 
 hunter:
   mode: mock                     # mock | live ; live also requires the --live-hunter CLI flag
@@ -72,6 +87,8 @@ qualification:
 email:
   mode: dry_run                  # dry_run | send ; send also requires the --send CLI flag
   max_words: 120
+  word_tolerance: 0.10           # "under about 120": hard fail above 132
+  max_em_dashes: 0
   guardrail_max_attempts: 2
   sender_name: "Vikram"
   sprinto_context: >-
