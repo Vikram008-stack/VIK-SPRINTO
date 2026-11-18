@@ -93,10 +93,12 @@ class Database:
             return self.conn.execute(sql, tuple(params))
 
     def query(self, sql: str, params: Iterable[Any] = ()) -> list[sqlite3.Row]:
-        return self.conn.execute(sql, tuple(params)).fetchall()
+        with self._write_lock:   # cheap; also makes the shared :memory: connection safe across threads
+            return self.conn.execute(sql, tuple(params)).fetchall()
 
     def one(self, sql: str, params: Iterable[Any] = ()) -> Optional[sqlite3.Row]:
-        return self.conn.execute(sql, tuple(params)).fetchone()
+        with self._write_lock:
+            return self.conn.execute(sql, tuple(params)).fetchone()
 
     def insert(self, table: str, row: dict[str, Any]) -> int:
         cols = list(row)

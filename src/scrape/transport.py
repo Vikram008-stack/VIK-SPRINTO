@@ -134,16 +134,17 @@ class FixtureTransport:
     """Offline tests. pages: url -> html | (status, html) | (status, html, final_url). Missing url -> 404."""
     name = "fixture"
 
-    def __init__(self, pages: dict, js_pages: Optional[dict] = None):
+    def __init__(self, pages: dict, js_pages: Optional[dict] = None, simulate_credits: bool = True):
         self.pages = pages
         self.js_pages = js_pages or {}
+        self.simulate_credits = simulate_credits      # tests check credit accounting; the offline demo is free
         self.calls: list[tuple[str, bool]] = []
 
     def fetch(self, url: str, render_js: bool) -> RawResponse:
         self.calls.append((url, render_js))
         src = self.js_pages if (render_js and url in self.js_pages) else self.pages
         val = src.get(url, src.get(url.rstrip("/")))
-        credits = 5 if render_js else 1
+        credits = (5 if render_js else 1) if self.simulate_credits else 0
         if val is None:
             return RawResponse(url=url, status_code=404, final_url=url, body="<html><body>Not found</body></html>",
                                content_type="text/html", credits=credits)

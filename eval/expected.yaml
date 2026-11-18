@@ -1,0 +1,34 @@
+# Expected outcomes for the evaluation set. Freeze BEFORE the first `python -m src.cli eval` run:
+# review each line, then set frozen: true. Unfrozen expectations make the accuracy number indefensible.
+# Status may list alternatives with "|". These are DRAFT predictions from public positioning; verify them.
+frozen: false
+
+companies:
+  chargebee.com:
+    status: NEEDS_RESEARCH
+    reason: SaaS billing platform that publicly claims SOC 2 / ISO 27001 -> already certified (policy research)
+  thoughtworks.com:
+    status: REJECTED
+    reason: IT consultancy / services -> hard disqualifier not_software
+  tcs.com:
+    status: REJECTED
+    reason: IT services and outsourcing -> hard disqualifier not_software
+  duolingo.com:
+    status: REJECTED|NEEDS_RESEARCH
+    reason: Primarily B2C subscription app; low enterprise exposure
+  getlago.com:
+    status: NEEDS_RESEARCH|QUALIFIED
+    reason: Open-source billing SaaS; likely already certified or no dated trigger found on site
+    expected_pain_signal: enterprise billing customers / security page
+  cal.com:
+    status: NEEDS_RESEARCH
+    reason: Scheduling SaaS that claims SOC 2 Type II and HIPAA -> already certified (policy research)
+  twenty.com:
+    status: NEEDS_RESEARCH
+    reason: Open-source CRM; B2B SaaS fit but no verified compliance trigger expected
+  documenso.com:
+    status: NEEDS_RESEARCH|QUALIFIED
+    reason: Open-source e-signature; compliance-sensitive buyers; trigger needs verification
+  # <USER_THIN_PICK>:
+  #   status: NEEDS_RESEARCH|INSUFFICIENT_DATA
+  #   reason: thin-signal site chosen by the user

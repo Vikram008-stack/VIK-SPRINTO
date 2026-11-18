@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -101,6 +102,9 @@ class BaseLlm:
         raise NotImplementedError
 
     # ------------------------------------------------------------------ helpers
+    def _price(self, model: str, in_t: int, out_t: int) -> Optional[float]:
+        return self.cfg.cost(model, in_t, out_t)
+
     def _key(self, *parts: str) -> str:
         return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
 
@@ -155,7 +159,7 @@ class BaseLlm:
                                                        "attempt": schema_attempt + 1})
                 prompt = (user + "\n\nYOUR PREVIOUS OUTPUT FAILED VALIDATION:\n" + str(e)[:1500]
                           + "\nReturn ONLY corrected JSON matching the schema.")
-        cost = self.cfg.cost(model, in_total, out_total)
+        cost = self._price(model, in_total, out_total)
         self._record(ctx, model, in_total, out_total, cost, cached=False)
         if parsed is None:
             raise LlmError(ReasonCode.LLM_SCHEMA_ERROR, f"{task}: output failed schema validation twice")
@@ -173,8 +177,8 @@ class BaseLlm:
         if ctx.budget:
             ctx.budget.check()
         raw, cites, supports = self._with_retries(lambda: self._call_grounded(model, prompt))
-        cost = self.cfg.cost(model, raw.input_tokens, raw.output_tokens)
-        if cost is not None:
+        cost = self._price(model, raw.input_tokens, raw.output_tokens)
+        if cost is not None and not isinstance(self, FakeLlm):
             cost += self.cfg.grounding_usd_per_request
         self._record(ctx, model, raw.input_tokens, raw.output_tokens, cost, cached=False, kind="search")
         return GroundedResult(text=raw.text, citations=cites, supports=supports, model=model,
@@ -290,14 +294,17 @@ class FakeLlm(BaseLlm):
         self.handlers = handlers or {}
         self.grounded_handler = grounded_handler
         self.calls: list[tuple[str, str]] = []
-        self._task_for_model: dict[str, str] = {}
+        self._tls = threading.local()      # the pipeline runs companies in parallel threads
+
+    def _price(self, model, in_t, out_t):
+        return 0.0      # no API was called
 
     def generate_json(self, ctx, task, system, user, schema):
-        self._current_task = task
+        self._tls.task = task
         return super().generate_json(ctx, task, system, user, schema)
 
     def _call_json(self, model, system, user, schema):
-        task = self._current_task
+        task = self._tls.task
         self.calls.append((task, user))
         if task not in self.handlers:
             raise LlmError(ReasonCode.LLM_ERROR, f"FakeLlm has no handler for task {task!r}")

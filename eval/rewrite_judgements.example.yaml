@@ -1,0 +1,4 @@
+# Copy to eval/rewrite_judgements.yaml after reading each draft in the review console.
+# true = the Growth Lead would rewrite this draft; false = send as-is (after review).
+# `python -m src.cli eval --report-only` then reports the rewrite rate (target < 20%, kill > 50%).
+# example.com: false

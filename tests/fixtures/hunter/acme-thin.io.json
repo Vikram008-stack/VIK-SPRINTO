@@ -1,0 +1,22 @@
+{
+  "data": {
+    "domain": "acme-thin.io",
+    "organization": "Acme Thin",
+    "pattern": "{first}",
+    "emails": [
+      {"value": "priya@acme-thin.io", "type": "personal", "confidence": 94, "first_name": "Priya", "last_name": "Raman",
+       "position": "Co-founder & CEO", "seniority": "executive", "department": "executive",
+       "verification": {"date": "2026-10-30", "status": "valid"}},
+      {"value": "daniel@acme-thin.io", "type": "personal", "confidence": 91, "first_name": "Daniel", "last_name": "Okafor",
+       "position": "Head of Engineering", "seniority": "executive", "department": "it",
+       "verification": {"date": "2026-10-30", "status": "valid"}},
+      {"value": "marta@acme-thin.io", "type": "personal", "confidence": 88, "first_name": "Marta", "last_name": "Lindqvist",
+       "position": "Head of Sales", "seniority": "executive", "department": "sales",
+       "verification": {"date": "2026-10-30", "status": "valid"}},
+      {"value": "sam@acme-thin.io", "type": "personal", "confidence": 52, "first_name": "Sam", "last_name": "Patel",
+       "position": "Engineering Manager", "seniority": "senior", "department": "it",
+       "verification": {"date": null, "status": "unknown"}}
+    ]
+  },
+  "meta": {"results": 4, "limit": 10, "offset": 0, "params": {"domain": "acme-thin.io", "type": "personal"}}
+}

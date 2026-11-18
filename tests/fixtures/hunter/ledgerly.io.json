@@ -1,0 +1,25 @@
+{
+  "data": {
+    "domain": "ledgerly.io",
+    "organization": "Ledgerly",
+    "pattern": "{first}.{last}",
+    "emails": [
+      {"value": "nina.shah@ledgerly.io", "type": "personal", "confidence": 61, "first_name": "Nina", "last_name": "Shah",
+       "position": "Head of Information Security", "seniority": "executive", "department": "it",
+       "verification": {"date": null, "status": "unknown"}},
+      {"value": "arjun.mehta@ledgerly.io", "type": "personal", "confidence": 92, "first_name": "Arjun", "last_name": "Mehta",
+       "position": "CTO", "seniority": "executive", "department": "executive",
+       "verification": {"date": "2026-11-02", "status": "valid"}},
+      {"value": "tom.reyes@ledgerly.io", "type": "personal", "confidence": 95, "first_name": "Tom", "last_name": "Reyes",
+       "position": "CEO", "seniority": "executive", "department": "executive",
+       "verification": {"date": "2026-11-02", "status": "valid"}},
+      {"value": "sarah.cole@ledgerly.io", "type": "personal", "confidence": 90, "first_name": "Sarah", "last_name": "Cole",
+       "position": "Head of Sales", "seniority": "executive", "department": "sales",
+       "verification": {"date": "2026-11-02", "status": "valid"}},
+      {"value": "lena.brooks@ledgerly.io", "type": "personal", "confidence": 86, "first_name": "Lena", "last_name": "Brooks",
+       "position": "Marketing Manager", "seniority": "senior", "department": "marketing",
+       "verification": {"date": "2026-11-02", "status": "accept_all"}}
+    ]
+  },
+  "meta": {"results": 5, "limit": 10, "offset": 0, "params": {"domain": "ledgerly.io", "type": "personal"}}
+}
