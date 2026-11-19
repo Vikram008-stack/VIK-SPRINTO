@@ -201,3 +201,10 @@ def test_no_code_path_sets_a_different_to():
 def test_cli_has_no_recipient_flag():
     cli = (Path(__file__).resolve().parents[1] / "src" / "cli.py").read_text(encoding="utf-8")
     assert not re.search(r'"--(to|recipient|email)"', cli)
+
+
+def test_one_line_email_is_formatted():
+    from src.mail.drafter import format_body
+    out = format_body("Hi Ana, We saw your SOC 2 role. Teams often lose time. Open to a 15-minute chat? Best, Vikram")
+    assert out.startswith("Hi Ana,\n\n") and out.endswith("Best,\nVikram")
+    assert format_body("Hi Ana,\n\nKeep.\n\nBest,\nV") == "Hi Ana,\n\nKeep.\n\nBest,\nV"

@@ -4,6 +4,8 @@ Evidence is referenced by evidence_id; code maps ids to URLs, so a draft cannot 
 """
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 from string import Template
 from typing import Optional
@@ -17,6 +19,36 @@ from src.llm.prompts import DRAFT_SYSTEM_V1, DRAFT_USER_V1
 from src.mail.guardrails import check_draft, word_count
 from src.pain.research import EvidenceItem
 from src.store.models import CompanyFacts, Contact, EmailDraft, EvidenceClaim, PainPoint, Step
+
+
+SIGNOFF_RE = re.compile(r"\s*\b(Best regards|Kind regards|Best|Thanks|Thank you|Regards|Cheers),\s*", re.I)
+NL = "\n"
+
+
+def format_body(body: str) -> str:
+    """Models sometimes return one long line. Put greeting, paragraphs and sign-off on their own lines."""
+    b = (body or "").strip()
+    if NL in b:
+        return b
+    m = re.match(r"^((Hi|Hello|Hey|Dear)\s+[^,\n]{1,40},)\s*", b, re.I)
+    greet, rest = (m.group(1), b[m.end():]) if m else ("", b)
+    sign = ""
+    sm = SIGNOFF_RE.search(rest)
+    if sm:
+        sign = rest[sm.start():].strip()
+        rest = rest[:sm.start()].strip()
+        sign = re.sub(r",\s*", "," + NL, sign, count=1)
+    sentences = re.split(r"(?<=[.?!])\s+", rest)
+    paras, cur = [], []
+    for sent in sentences:
+        cur.append(sent)
+        if len(cur) == 2 or sent.endswith("?"):
+            paras.append(" ".join(cur))
+            cur = []
+    if cur:
+        paras.append(" ".join(cur))
+    parts = ([greet] if greet else []) + paras + ([sign] if sign else [])
+    return (NL + NL).join(p for p in parts if p)
 
 
 class LlmClaim(BaseModel):
@@ -60,7 +92,7 @@ def _to_draft(raw: LlmDraft, by_id: dict[str, EvidenceItem]) -> tuple[EmailDraft
         claims.insert(0, EvidenceClaim(claim=raw.opening_hook[:200], source_url=hook.source_url))
     d = EmailDraft(subject=raw.subject.strip(), recipient_name=raw.recipient_name.strip(),
                    opening_hook=raw.opening_hook.strip(), pain_point_1=raw.pain_point_1.strip(),
-                   pain_point_2=(raw.pain_point_2 or None), email_body=raw.email_body.strip(),
+                   pain_point_2=(raw.pain_point_2 or None), email_body=format_body(raw.email_body),
                    personalisation_evidence=claims, cta=raw.cta.strip())
     return d, (hook.source_url if hook else None), errs
 
