@@ -241,6 +241,11 @@
         <span class="small">${esc(h.by||'reviewer')} \u00b7 ${esc(new Date(h.at).toLocaleString())}</span></div>
         <p style="margin:8px 0 0">"${esc(h.reason)}"</p>
         <p class="small" style="margin:6px 0 0">The rules said <b>${esc((STATUS[h.original_status]||[h.original_status])[0])}</b>${h.original_score!=null?` (score ${h.original_score}/100)`:''}. That verdict and its evidence stay on record below.</p></section>` : '';
+    if (opts.onReview && h && h.decision === 'approve' && o.status === 'DRAFT_NEEDS_HUMAN' && !o.draft)
+      return banner + `<section class="panel review"><h2>Drafting didn't finish</h2>
+        <p style="margin:0 0 10px;color:var(--ink-2)">${esc(o.status_reason || '')}</p>
+        <div class="row"><button class="btn primary" type="button" id="rv-retry">Try drafting again</button>
+        <span class="small">Uses your logged reason: "${esc(h.reason)}"</span></div></section>`;
     if (!opts.onReview || h || !REVIEWABLE.includes(o.status)) return banner;
     const q = o.qualification||{};
     const hd = q.hard_disqualifier && q.hard_disqualifier !== 'already_certified' ? q.hard_disqualifier : null;
@@ -283,6 +288,9 @@
       btn.textContent = decision === 'approve' ? 'Finding the contact and drafting… (up to 2 min)' : 'Saving…';
       await opts.onReview(o, decision, reason); renderList(); };
     if (ra) ra.onclick = () => doReview('approve', ra);
+    const rr = document.getElementById('rv-retry');
+    if (rr) rr.onclick = async () => { rr.disabled = true; rr.textContent = 'Drafting… (up to 2 min)';
+      await opts.onReview(o, 'approve', o.human_override.reason); renderList(); };
     if (rj) rj.onclick = () => doReview('reject', rj);
     const sb = document.getElementById('sendbtn');
     if(sb) sb.onclick = async () => { sb.disabled = true; sb.textContent = 'Sending…'; try { await opts.onSend(o); } finally { renderList(); } };

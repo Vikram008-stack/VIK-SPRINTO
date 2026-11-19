@@ -66,6 +66,11 @@ class LlmCfg(_Cfg):
     models: dict[Literal["extract", "qualify", "pain", "draft", "search"], str]
     thinking_level: Optional[str] = None
     fallback_model: Optional[str] = None
+    fallback_models: list[str] = Field(default_factory=list)   # tried in order after fallback_model
+
+    def fallback_chain(self) -> list[str]:
+        out = [self.fallback_model] if self.fallback_model else []
+        return out + [m for m in self.fallback_models if m not in out]
     temperature: float = 0.2
     max_retries: int = Field(2, ge=0, le=2)
     timeout_s: int = 60

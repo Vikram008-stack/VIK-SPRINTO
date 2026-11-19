@@ -118,6 +118,22 @@ NEXT_ACTION = {
 }
 
 
+def friendly_llm_error(e) -> str:
+    """Plain-English status for an AI failure; the raw detail stays in the failures list (reason codes)."""
+    d = (getattr(e, "detail", "") or "").lower()
+    if any(k in d for k in ("503", "unavailable", "high demand", "overloaded")):
+        return ("The AI model is overloaded right now (Google returned 'high demand' on every model we tried). "
+                "The research is saved; try again in a minute.")
+    if any(k in d for k in ("429", "quota", "resource_exhausted", "rate limit")):
+        return ("The AI model's usage limit was reached (free-tier daily quota). Try again later, or enable "
+                "billing on the Gemini key.")
+    if "timeout" in d or "timed out" in d or "deadline" in d:
+        return "The AI model took too long to answer. Try again in a minute."
+    if getattr(e, "reason", None) is not None and e.reason.value == "llm_schema_error":
+        return "The AI model's answer failed validation twice, so nothing was guessed. Try again."
+    return "The AI step failed. The research is saved; try again in a minute."
+
+
 class Pipeline:
     def __init__(self, settings: Settings, db: Database, llm: BaseLlm, fetcher: PageFetcher,
                  search: Optional[CachedSearch], hunter: HunterClient, sender: GmailSender, run_id: str,
@@ -267,7 +283,7 @@ class Pipeline:
         except LlmError as e:
             self._fail(o, Step.EXTRACT if o.qualification is None else Step.DRAFT, e.reason, e.detail)
             status = "INSUFFICIENT_DATA" if o.qualification is None else "DRAFT_NEEDS_HUMAN"
-            return self._finish(o, session, status, f"{e.reason.value}: {e.detail[:200]}")
+            return self._finish(o, session, status, friendly_llm_error(e))
         finally:
             o.cost = budget.snapshot()
 
@@ -358,7 +374,7 @@ class Pipeline:
             out = self._finish(o, None, "DRAFT_NEEDS_HUMAN", f"budget_exceeded: {e}")
         except LlmError as e:
             self._fail(o, Step.DRAFT, e.reason, e.detail)
-            out = self._finish(o, None, "DRAFT_NEEDS_HUMAN", f"{e.reason.value}: {e.detail[:200]}")
+            out = self._finish(o, None, "DRAFT_NEEDS_HUMAN", friendly_llm_error(e))
         finally:
             o.cost = budget.snapshot()
         if out.status_reason and not out.status_reason.startswith("Approved"):

@@ -124,7 +124,7 @@ class BaseLlm:
             except TransientLlmError as e:
                 last = e
                 if attempt < self.cfg.max_retries:
-                    self.sleep(2 ** attempt)
+                    self.sleep(1.5 * (attempt + 1))
         reason = ReasonCode.LLM_TIMEOUT if last and "timeout" in str(last).lower() else ReasonCode.LLM_ERROR
         raise LlmError(reason, f"transient after {self.cfg.max_retries + 1} attempts: {last}")
 
@@ -148,17 +148,24 @@ class BaseLlm:
         parsed = None
         raw: Optional[RawCall] = None
         for schema_attempt in range(2):   # original + ONE corrective retry
-            try:
-                raw = self._with_retries(lambda: self._call_json(model, system, prompt, schema))
-            except LlmError as e:
-                fb = self.cfg.fallback_model
-                if e.reason not in (ReasonCode.LLM_ERROR, ReasonCode.LLM_TIMEOUT) or not fb or fb == model \
-                        or "transient" not in e.detail:
-                    raise
-                log.warning("model overloaded; using fallback", extra={"domain": ctx.domain, "task": task,
-                                                                       "model": model, "fallback": fb})
-                model = fb
-                raw = self._with_retries(lambda: self._call_json(model, system, prompt, schema))
+            # model chain: task model, then each fallback, only on transient errors (overload, timeout, 429)
+            chain = [model] + [m for m in self.cfg.fallback_chain() if m != model]
+            raw = None
+            last_err: Optional[LlmError] = None
+            for i, m in enumerate(chain):
+                try:
+                    raw = self._with_retries(lambda: self._call_json(m, system, prompt, schema))
+                    model = m
+                    break
+                except LlmError as e:
+                    last_err = e
+                    if e.reason not in (ReasonCode.LLM_ERROR, ReasonCode.LLM_TIMEOUT) or "transient" not in e.detail:
+                        raise
+                    if i + 1 < len(chain):
+                        log.warning("model overloaded; trying next model", extra={
+                            "domain": ctx.domain, "task": task, "model": m, "next": chain[i + 1]})
+            if raw is None:
+                raise last_err  # every model in the chain was unavailable
             in_total += raw.input_tokens
             out_total += raw.output_tokens
             try:
