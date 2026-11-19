@@ -145,3 +145,22 @@ footer{margin-top:26px;color:var(--ink-3);font-size:12px;text-align:center}
 .verdict>*,.two>*,.layout>*,.detail>*{min-width:0}
 .pill{max-width:100%;overflow:hidden;text-overflow:ellipsis}
 .verdict h3{overflow-wrap:anywhere}
+
+/* --- follow-up agent: state object at every checkpoint --- */
+.fu-ctl{background:var(--panel-2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:6px 0 14px}
+.fu-ctl textarea{flex:1;min-width:220px;font:14px/1.45 var(--sans);padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink);resize:vertical}
+.fu-table{border-collapse:separate;border-spacing:0;min-width:860px;font-size:13px}
+.fu-table thead th{background:#14233b;color:#fff;text-transform:none;letter-spacing:0;font-size:12.5px;font-weight:650;text-align:center;padding:10px 8px;border:0}
+.fu-table thead th:first-child{border-top-left-radius:12px;text-align:left}
+.fu-table thead th:last-child{border-top-right-radius:12px}
+.fu-table thead th span.fu-ico{display:block;font-size:16px;line-height:1;margin-bottom:4px;opacity:.9}
+.fu-table thead th.fu-step span{font-weight:400;opacity:.8}
+.fu-table td{text-align:center;vertical-align:middle;padding:7px 6px;border-bottom:1px solid var(--line-2)}
+.fu-table td.fu-step{text-align:left;display:flex;gap:10px;align-items:center;min-width:220px}
+.fu-n{width:24px;height:24px;border-radius:50%;background:var(--info-soft);color:var(--info);display:grid;place-items:center;font-weight:700;font-size:12px;flex:none}
+.fu-cell{display:inline-block;min-width:84px;padding:5px 10px;border-radius:8px;background:var(--muted-soft);color:var(--ink-2);font-variant-numeric:tabular-nums}
+.fu-cell.on{background:#dff3e4;color:#1f6a3d;font-weight:700}
+.fu-det td{text-align:left;color:var(--ink-3);font-size:12px;padding:0 6px 8px;border-bottom:1px solid var(--line-2)}
+.fu-final{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-top:12px;font-size:12.5px;color:var(--ink-2)}
+.fu-final>span:last-child{background:#eef8f0;border-radius:10px;padding:8px 12px;flex:1}
+.fu-legend .fu-cell{min-width:22px;padding:3px 8px;margin-right:4px}

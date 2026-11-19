@@ -40,7 +40,7 @@
   const daysAgo = d => { if(!d) return ''; const t = (D.today ? new Date(D.today) : new Date()); const n = Math.round((t - new Date(d))/864e5); return n<0? `in ${-n} days` : n===0?'today':`${n} days ago`; };
   let filter = 'all', currentKey = null, query = '';
   const key = o => o._key || o.domain;
-  const opts = { onSend: null, sendLabel: null };
+  const opts = { onSend: null, sendLabel: null, onFollowup: null };
 
   function groups(){ const c = {ready:0,human:0,nofit:0,dup:0,running:0}; OUT.forEach(o => c[(STATUS[o.status]||['','','human'])[2]]++); return c; }
   function sortOut(){ OUT.sort((a,b) => (ORDER[a.status]??9)-(ORDER[b.status]??9) || (((b.qualification||{}).score)||0)-(((a.qualification||{}).score)||0)); }
@@ -169,6 +169,39 @@
         <details><summary>Every claim and its source (${(d.personalisation_evidence||[]).length})</summary><ul>${(d.personalisation_evidence||[]).map(e=>`<li>${esc(e.claim)} · ${link(e.source_url)}</li>`).join('')}</ul></details>` : '';
     return `<section class="panel"><h2>The email</h2>${pains.length?`<div style="margin-bottom:16px">${pp}${flags}</div>`:''}${letter}</section>`;
   }
+
+  const FU_FIELDS = [['reply_status','\u2709'],['calendar_checked','\u25A6'],['times_proposed','\u2630'],
+                     ['reply_round','\u21BB'],['meeting_status','\u25F7'],['crm_logged','\u25CE']];
+  const FU_SCEN = [['accepts','Interested \u2192 accepts'],['counter_proposes','Interested \u2192 counter-proposes'],['not_interested','Not interested'],['no_reply','No reply']];
+  const fuVal = v => Array.isArray(v) ? (v.length ? '[' + v.join(', ') + ']' : 'none') : String(v);
+  function followup(o){
+    if (!opts.onFollowup || !['DRAFTED','SENT'].includes(o.status)) return '';
+    const f = o._followup;
+    const ctl = `<div class="fu-ctl"><div class="small" style="margin-bottom:8px">Simulate the prospect's reply, or paste a real one. The agent classifies it (a branch, no tool call), then runs its tools.</div>
+      <div class="row">${FU_SCEN.map(([k,l])=>`<button class="btn${f&&f._scenario===k&&!f._reply?' primary':''}" type="button" data-sc="${k}">${esc(l)}</button>`).join('')}</div>
+      <div class="row" style="margin-top:10px;align-items:flex-start"><textarea id="fu-reply" rows="2" placeholder="...or paste the prospect's reply, e.g. Interested! Can we do Friday 3pm instead?" aria-label="Prospect reply">${esc((f&&f._reply)||'')}</textarea>
+      <button class="btn" type="button" id="fu-run">Run on this reply</button></div></div>`;
+    if (!f) return `<section class="panel"><h2>Follow-up agent (after the email)</h2>${ctl}</section>`;
+    if (f.error) return `<section class="panel"><h2>Follow-up agent (after the email)</h2>${ctl}<p class="notice show err">${esc(f.error)}</p></section>`;
+    const head = `<tr><th class="fu-step">Checkpoint <span>(workflow step)</span></th>${FU_FIELDS.map(([k,i])=>`<th><span class="fu-ico" aria-hidden="true">${i}</span>${esc(k)}</th>`).join('')}</tr>`;
+    const body = f.checkpoints.map(cp => `<tr><td class="fu-step"><span class="fu-n">${cp.n}</span><div><b>${esc(cp.title)}</b><div class="small">(${esc(cp.subtitle)})</div></div></td>
+      ${FU_FIELDS.map(([k])=>`<td><span class="fu-cell${cp.changed.includes(k)?' on':''}">${esc(fuVal(cp.state[k]))}</span></td>`).join('')}</tr>
+      ${cp.detail?`<tr class="fu-det"><td></td><td colspan="${FU_FIELDS.length}">${esc(cp.detail)}</td></tr>`:''}`).join('');
+    const fin = f.final_state;
+    const cls = f.classified_reply ? `<p class="small">Reply classified as <b>${esc(f.classified_reply.intent)}</b> (evidence: "${esc(f.classified_reply.evidence)}")${f.classified_reply.proposed_time?` \u00b7 proposed ${esc(f.classified_reply.proposed_time)}`:''}.</p>` : '';
+    const extra = (f.emails||[]).filter(e=>e.kind!=='cold_email');
+    const emails = extra.map(e=>`<div class="letter" style="margin-top:10px"><div class="hdr"><b>To:</b> demo inbox only \u00b7 <b>Intended for:</b> ${esc(e.intended_recipient)}<br><b>Subject:</b> ${esc(e.subject)}</div><div class="body">${esc(e.body)}</div></div>`).join('');
+    const crm = f.crm_record ? `<div class="evc" style="margin-top:10px"><div class="top"><span class="pill i">demo CRM record</span></div><div class="small">${Object.entries(f.crm_record).filter(([k,v])=>v!==null&&v!=='').map(([k,v])=>`<b>${esc(k)}</b>: ${esc(v)}`).join(' \u00b7 ')}</div></div>` : '';
+    return `<section class="panel"><h2>Follow-up agent: the state object at every checkpoint</h2>
+      <p class="small" style="margin-top:-6px">Same six fields. Watch them fill in as the agent moves through the workflow. Green = changed from the previous step.
+        Calendar and CRM here are <b>demo systems</b> (nothing real is connected); emails go only to the demo inbox.</p>
+      ${ctl}${cls}
+      <div class="tablewrap"><table class="fu-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>
+      <div class="fu-final"><span class="fu-legend"><span class="fu-cell on">&nbsp;</span> Changed from previous step</span>
+        <span><b>Final state:</b> ${FU_FIELDS.map(([k])=>`<b>${esc(k)}</b>: ${esc(fuVal(fin[k]))}`).join(' \u00b7 ')}</span></div>
+      ${emails||crm?`<details open><summary>What the agent produced (${extra.length} email${extra.length===1?'':'s'}${f.booked_slot?', 1 booking':''}${f.crm_record?', 1 CRM record':''})</summary>${emails}${crm}</details>`:''}
+    </section>`;
+  }
   function issues(o){
     const f = o.failures||[]; const flags = o.flags||[];
     if(!f.length && !flags.length) return '';
@@ -179,9 +212,14 @@
     const det = document.getElementById('detail'); if (!det) return;
     const o = OUT.find(x => key(x)===currentKey);
     if(!o){ det.innerHTML = `<section class="panel"><p class="empty">Results appear here as each company finishes.</p></section>`; return; }
-    det.innerHTML = verdict(o) + `<div class="two"><div class="detail">${breakdown(o)}${person(o)}</div><div class="detail">${evidence(o)}${research(o)}</div></div>` + email(o) + issues(o);
+    det.innerHTML = verdict(o) + `<div class="two"><div class="detail">${breakdown(o)}${person(o)}</div><div class="detail">${evidence(o)}${research(o)}</div></div>` + email(o) + followup(o) + issues(o);
     const c = document.getElementById('copy');
     if(c) c.onclick = () => { navigator.clipboard?.writeText(document.getElementById('emailbody').textContent).then(()=>{ c.textContent='Copied'; setTimeout(()=>c.textContent='Copy email text',1400); }); };
+    det.querySelectorAll('[data-sc]').forEach(b => b.onclick = async () => { b.disabled = true; b.textContent = 'Running...';
+      await opts.onFollowup(o, { scenario: b.dataset.sc }); renderList(); });
+    const fr = document.getElementById('fu-run');
+    if (fr) fr.onclick = async () => { const t = document.getElementById('fu-reply').value;
+      fr.disabled = true; fr.textContent = 'Running...'; await opts.onFollowup(o, { reply_text: t }); renderList(); };
     const sb = document.getElementById('sendbtn');
     if(sb) sb.onclick = async () => { sb.disabled = true; sb.textContent = 'Sending…'; try { await opts.onSend(o); } finally { renderList(); } };
   }
@@ -217,6 +255,7 @@
     },
     all() { return OUT.slice(); },
     setToday(t) { D.today = t; },
+    today() { return D.today || null; },
     esc
   };
 })();

@@ -248,6 +248,36 @@ def send(payload: dict = Body(default={})):
     return res.model_dump(mode="json")
 
 
+@app.post("/api/followup")
+def followup(payload: dict = Body(default={})):
+    """Follow-up agent after the cold email: six-field state at every checkpoint (demo calendar + demo CRM)."""
+    from src.followup.workflow import SCENARIOS, run_followup
+    p = payload or {}
+    o = p.get("outcome") or {}
+    scenario = p.get("scenario") or "accepts"
+    reply_text = p.get("reply_text")
+    counter_text = p.get("counter_text")
+    if scenario not in SCENARIOS:
+        return _err(400, "invalid_scenario", f"Unknown scenario. Use one of: {', '.join(SCENARIOS)}.")
+    for name, val in (("reply_text", reply_text), ("counter_text", counter_text)):
+        if val is not None and (not isinstance(val, str) or len(val) > 2000):
+            return _err(400, "invalid_reply", f"'{name}' must be text under 2000 characters.")
+    if reply_text is not None and not reply_text.strip():
+        return _err(400, "empty_reply", "Paste the prospect's reply, or pick a scenario instead.")
+    if o.get("status") not in ("DRAFTED", "SENT"):
+        return _err(409, "not_ready", "Follow-up runs only for companies with an approved draft (status DRAFTED or SENT).")
+    today = None
+    try:
+        today = date.fromisoformat(str(p.get("today"))[:10]) if p.get("today") else None
+    except ValueError:
+        today = None
+    try:
+        return run_followup(o, scenario, reply_text, counter_text, today=today,
+                            sender=_settings().pipeline.email.sender_name or "Vikram")
+    except ValueError as e:
+        return _err(422, "no_contact", str(e))
+
+
 @app.post("/api/demo")
 def demo():
     from src import demo_offline

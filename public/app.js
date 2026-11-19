@@ -143,6 +143,14 @@
     Desk.upsert(o, true);
   }
 
+  async function followupOne(o, args) {
+    const body = Object.assign({ outcome: o, today: Desk.today() }, args);
+    const r = await api('/api/followup', body, 60000);
+    if (r.ok) { o._followup = Object.assign(r.data, { _scenario: args.scenario || null, _reply: args.reply_text || null }); }
+    else { o._followup = { error: (r.data && r.data.message) || 'Follow-up failed.', _reply: args.reply_text || null }; }
+    Desk.upsert(o, true);
+  }
+
   function download(name, text, type) {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([text], { type }));
@@ -173,6 +181,6 @@
   $('dl-json').onclick = () => download('sprinto-outreach-results.json', JSON.stringify(Desk.all(), null, 2), 'application/json');
   $('dl-csv').onclick = () => download('sprinto-outreach-summary.csv', csv(), 'text/csv');
 
-  Desk.init({ title: 'Ready', outcomes: [] }, { onSend: sendOne, sendLabel: 'Send to my demo inbox' });
+  Desk.init({ title: 'Ready', outcomes: [] }, { onSend: sendOne, sendLabel: 'Send to my demo inbox', onFollowup: followupOne });
   loadHealth();
 })();

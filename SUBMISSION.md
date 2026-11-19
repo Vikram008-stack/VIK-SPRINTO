@@ -32,6 +32,14 @@ documenso.com
   claim mapped to a source. "Send to my demo inbox" delivers it only to the configured demo address.
 - **Downloads**: full results (JSON) and a summary (CSV).
 
+## Follow-up agent (after the email)
+
+On any company with a ready draft, the **Follow-up agent** panel runs the post-email workflow: reply branch ->
+check calendar -> send email proposing times -> (counter-proposal loop) -> book meeting -> update CRM, showing the
+six-field state object (reply_status, calendar_checked, times_proposed, reply_round, meeting_status, crm_logged) at
+every checkpoint with changed cells highlighted. Pick a scenario or paste a real reply. Calendar/CRM are labelled demo
+systems.
+
 ## Exceptions handled (test these)
 
 | Input / situation | What you see |
@@ -65,7 +73,9 @@ documenso.com
    documenso and cal.com go to **Needs a human look** (no verified trigger / already certified) with the open questions.
 5. **Safety + defensibility (30 s)**: emails only reach the demo inbox; every claim has a source; missing facts stay
    empty and go to a human; the model never overrides the rule-based score.
-6. **Close (10 s)**: repo link, tests (`pytest`: 148 offline tests), README for architecture and kill criteria.
+6. **Follow-up agent (30 s)**: on Ledgerly click *Interested -> counter-proposes* and walk the 7 checkpoints: watch
+   the six fields fill in, calendar_checked flip back to false on the counter-proposal, then confirmed and CRM logged.
+7. **Close (10 s)**: repo link, tests (`pytest`: 148 offline tests), README for architecture and kill criteria.
 
 ## Local commands
 

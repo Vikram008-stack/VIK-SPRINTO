@@ -31,6 +31,29 @@ Vercel env vars: `GEMINI_API_KEY`, `SCRAPINGBEE_API_KEY`, `HUNTER_API_KEY`, `DEM
 `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` / `GMAIL_REFRESH_TOKEN` (from `python -m src.cli gmail-auth`).
 Run locally: `.venv\Scripts\python -m uvicorn api.index:app --port 8766` and open http://127.0.0.1:8766.
 
+## Follow-up agent: the state object at every checkpoint
+
+After the cold email, a second agent (`src/followup/workflow.py`, `POST /api/followup`) handles the reply. The SAME
+six-field state object is snapshotted at every checkpoint, and the UI shows it as a table (changed cells in green):
+
+| # | Checkpoint | Tool | reply_status | calendar_checked | times_proposed | reply_round | meeting_status | crm_logged |
+|---|---|---|---|---|---|---|---|---|
+| 1 | After Send Email | Seq 1, Tool 1 `send_email` | no_reply | false | none | 0 | unscheduled | false |
+| 2 | After prospect replies "Interested" | branch, no tool call | **interested** | false | none | 0 | unscheduled | false |
+| 3 | After Check Calendar | Seq 2, Tool 2 `check_calendar` | interested | **true** | none | 0 | unscheduled | false |
+| 4 | After Send Email, proposing times | Tool 3 `send_email` | interested | true | **[2 slots]** | 0 | **pending_confirmation** | false |
+| 5 | If prospect counter-proposes | loop back to Check Calendar | interested | **false** | [2 slots] | **1** | pending_confirmation | false |
+| 6 | After Book Meeting | Tool 4 `book_meeting` | interested | true | [2 slots] | 1 | **confirmed** | false |
+| 7 | After Update CRM | Tool 5 `update_crm` | interested | true | [2 slots] | 1 | confirmed | **true** |
+
+- Scenarios: interested and accepts (skips step 5), counter-proposes (loop), not interested (stop, close in CRM),
+  no reply (log a nudge). Or paste a real reply: a deterministic rule-based classifier picks the branch and parses a
+  proposed time ("Can we do Friday 3pm instead?").
+- The counter-proposal loop is capped at 2 rounds; beyond that `meeting_status = needs_human`. Ambiguous replies go
+  to a human; the agent never guesses.
+- Calendar and CRM are **demo systems** (deterministic, clearly labelled): no real calendar or CRM is connected in
+  this build. Proposal and confirmation emails go only to the demo inbox.
+
 ## Quick start (Windows)
 
 ```
