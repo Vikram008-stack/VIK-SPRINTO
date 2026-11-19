@@ -316,6 +316,9 @@ def resolve(q: str = ""):
     q = (q or "").strip()
     if len(q) < 2:
         return {"query": q, "suggestions": []}
+    # "CHARGEBEE." / "Chargebee," / '"Acme"' -> tidy name (keeps dots inside links like cal.com)
+    if not re.search(r"\.[a-z]{2,}(/|$)", q.lower()) and not q.lower().startswith(("http://", "https://")):
+        q = re.sub(r"^[^\w]+|[^\w]+$", "", q).strip() or q
     if len(q) > 200:
         return _err(400, "query_too_long", "Search for a company name or paste one link.")
     looks_like_domain = bool(re.search(r"\.[a-z]{2,}(/|$)", q.lower())) or q.lower().startswith(("http://", "https://"))

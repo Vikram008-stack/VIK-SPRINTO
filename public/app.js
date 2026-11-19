@@ -186,10 +186,10 @@
     unique.forEach(u => Desk.upsert({ domain: u.domain, input_raw: u.raw, status: 'QUEUED', status_reason: 'Waiting for a free slot' }));
     setBusy(true);
     let done = 0; progress(0, unique.length);
-    const queue = unique.slice();
+    const work = unique.slice();            // NOT named `queue`: that would shadow the chip list above (TDZ crash)
     async function worker() {
-      while (queue.length) {
-        const u = queue.shift();
+      while (work.length) {
+        const u = work.shift();
         Desk.upsert({ domain: u.domain, input_raw: u.raw, status: 'RUNNING' });
         let r = await api('/api/process', { domain: u.raw }, TIMEOUT_MS);
         const transient = x => !x.ok && (!x.data || !x.data.outcome) && (x.status === 0 || x.status >= 500 ||

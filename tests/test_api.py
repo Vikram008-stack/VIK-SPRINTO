@@ -140,3 +140,23 @@ def test_resolve_names_use_wikidata_then_marked_guesses(client, monkeypatch):
                   "description": g[0]["description"]}]
     none = c.get("/api/resolve", params={"q": "zzqq nothing"}).json()
     assert none["suggestions"] == [] and "Paste its website link" in none["message"]
+
+
+def test_resolve_ignores_stray_punctuation(client, monkeypatch):
+    c, idx = client
+    idx._resolve_cache.clear()
+    seen = []
+    monkeypatch.setattr(idx, "_wikidata_lookup", lambda q: seen.append(q) or [])
+    monkeypatch.setattr(idx, "_dns_exists", lambda host: False)
+    c.get("/api/resolve", params={"q": "CHARGEBEE."})
+    c.get("/api/resolve", params={"q": '"Acme Corp",'})
+    assert seen == ["CHARGEBEE", "Acme Corp"]
+
+
+def test_app_js_has_no_shadowed_queue():
+    """Regression (live, 2026-11-19): a second `const queue` inside runBatch shadowed the chip list and the
+    Research button threw 'Cannot access queue before initialization'."""
+    import re
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "public" / "app.js").read_text(encoding="utf-8")
+    assert len(re.findall(r"\b(const|let|var)\s+queue\b", js)) == 1
