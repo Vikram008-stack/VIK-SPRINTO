@@ -248,6 +248,73 @@ def send(payload: dict = Body(default={})):
     return res.model_dump(mode="json")
 
 
+REVIEWABLE = {"NEEDS_RESEARCH", "INSUFFICIENT_DATA", "REJECTED", "NO_CONTACT_FOUND", "DRAFT_NEEDS_HUMAN"}
+
+
+@app.post("/api/approve")
+def approve(payload: dict = Body(default={})):
+    """Human-in-the-loop: approve (continue to contact -> pain points -> draft) or reject, with a logged reason."""
+    p = payload or {}
+    o = p.get("outcome") or {}
+    decision = p.get("decision")
+    reason = (p.get("reason") or "").strip() if isinstance(p.get("reason"), str) else ""
+    if decision not in ("approve", "reject"):
+        return _err(400, "invalid_decision", "decision must be 'approve' or 'reject'.")
+    if len(reason) < 3 or len(reason) > 500:
+        return _err(400, "reason_required", "Write a short reason (3-500 characters). It is logged with the decision.")
+    try:
+        domain = normalise_domain(str(o.get("domain") or ""))
+    except InvalidDomain:
+        return _err(400, "invalid_request", "Approve needs a processed company.")
+    if o.get("status") not in REVIEWABLE:
+        return _err(409, "not_reviewable", f"A company with status {o.get('status')} cannot be approved or rejected here.")
+    hd = (o.get("qualification") or {}).get("hard_disqualifier")
+    if decision == "approve" and hd and hd != "already_certified":
+        return _err(409, "hard_disqualifier", f"Blocked: '{hd.replace('_', ' ')}' is a hard disqualifier, so it cannot "
+                                              f"be approved. You can still reject it.")
+    s = _settings()
+    offline = str(o.get("run_id") or "").startswith("demo-")
+    if decision == "approve" and not offline and not s.secrets.gemini_api_key:
+        return _fail_outcome(domain, o.get("input_raw") or domain, "missing_config",
+                             "The server has no GEMINI_API_KEY configured, so it cannot draft the email.")
+    from src.store.db import Database
+    run_id = ("demo-" if offline else "") + "approve-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S") + \
+        "-" + uuid.uuid4().hex[:4]
+    import tempfile
+    db_path = (Path(tempfile.mkdtemp(prefix="sprinto-approve-")) / "a.db") if (offline or is_serverless()) \
+        else s.pipeline.paths.abs("db")
+    db = Database(db_path)
+    db.init()
+    result: dict = {}
+
+    def _work():
+        try:
+            import json as _json
+            if offline:
+                from src.factory import build_offline_demo
+                pipe = build_offline_demo(s, db, run_id, reports_dir=db_path.parent / "reports",
+                                          outcomes_dir=db_path.parent / "outcomes")
+            else:
+                from src.factory import build_live
+                if _hunter_live(s):
+                    s.pipeline.hunter.mode = "live"
+                pipe = build_live(s, db, run_id, dry_run=True, live_hunter=_hunter_live(s),
+                                  transport=None if s.secrets.scrapingbee_api_key else "direct", today=date.today())
+            out = pipe.approve(o, decision, reason, reviewer="Growth Lead (web)")
+            result["outcome"] = _json.loads(out.to_json())
+        except Exception as e:
+            result["outcome"] = _fail_outcome(domain, o.get("input_raw") or domain, "unexpected_error",
+                                              f"{type(e).__name__}: {str(e)[:200]}", step="approve")
+
+    t = threading.Thread(target=_work, daemon=True)
+    t.start()
+    t.join(PROCESS_TIMEOUT_S)
+    if t.is_alive():
+        return _fail_outcome(domain, o.get("input_raw") or domain, "timeout",
+                             f"Drafting took longer than {PROCESS_TIMEOUT_S} s; try approving again.", step="approve")
+    return result.get("outcome") or _fail_outcome(domain, domain, "unexpected_error", "no result", step="approve")
+
+
 @app.post("/api/followup")
 def followup(payload: dict = Body(default={})):
     """Follow-up agent after the cold email: six-field state at every checkpoint (demo calendar + demo CRM)."""

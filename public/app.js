@@ -143,6 +143,19 @@
     Desk.upsert(o, true);
   }
 
+  async function reviewOne(o, decision, reason) {
+    notice('ok', decision === 'approve' ? `Approved ${Desk.esc(o.domain)}: the agent is choosing the contact and drafting the email…` : `Rejecting ${Desk.esc(o.domain)}…`);
+    const r = await api('/api/approve', { outcome: o, decision, reason }, TIMEOUT_MS);
+    if (r.ok && r.data && r.data.status) {
+      const n = r.data; n._key = o._key; Desk.upsert(n, true);
+      notice(n.status === 'DRAFTED' ? 'ok' : (n.status === 'REJECTED' ? 'ok' : 'warn'),
+        `${Desk.esc(o.domain)}: ${Desk.esc(n.status_reason || n.status)}`);
+    } else {
+      notice('err', Desk.esc((r.data && r.data.message) || 'The decision could not be saved.'));
+      Desk.upsert(o, true);
+    }
+  }
+
   async function followupOne(o, args) {
     const body = Object.assign({ outcome: o, today: Desk.today() }, args);
     const r = await api('/api/followup', body, 60000);
@@ -181,6 +194,6 @@
   $('dl-json').onclick = () => download('sprinto-outreach-results.json', JSON.stringify(Desk.all(), null, 2), 'application/json');
   $('dl-csv').onclick = () => download('sprinto-outreach-summary.csv', csv(), 'text/csv');
 
-  Desk.init({ title: 'Ready', outcomes: [] }, { onSend: sendOne, sendLabel: 'Send to my demo inbox', onFollowup: followupOne });
+  Desk.init({ title: 'Ready', outcomes: [] }, { onSend: sendOne, sendLabel: 'Send to my demo inbox', onFollowup: followupOne, onReview: reviewOne });
   loadHealth();
 })();

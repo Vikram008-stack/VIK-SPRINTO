@@ -189,6 +189,14 @@ def fake_pain(system: str, user: str) -> dict:
                                                   "questionnaires that land on engineering.",
              "why_it_matters_to_this_role": "Questionnaires slow deals and interrupt engineering work.",
              "confidence": "MEDIUM"}]}
+    if "Schedulr" in user:   # used after a human approves the already-certified demo company
+        ent = _ids(user, "healthcare")[:1]
+        if ent:
+            return {"pain_points": [
+                {"evidence_id": ent[0], "hypothesis": "Healthcare and finance buyers often keep sending security "
+                                                      "reviews even after SOC 2, and renewals add evidence work.",
+                 "why_it_matters_to_this_role": "A Head of Information Security owns the controls and the reviews.",
+                 "confidence": "MEDIUM"}]}
     return {"pain_points": []}
 
 
@@ -238,6 +246,26 @@ def fake_draft(system: str, user: str) -> dict:
                 {"claim": "SOC 2 Type II audit scheduled for Q1 2027", "evidence_id": audit},
                 {"claim": "Enterprise customer Northwind Logistics", "evidence_id": ent}],
             "cta": "Would a 15-minute chat before the audit window help?"}
+    if "Schedulr" in user:
+        ent = _ids(user, "healthcare")[0]
+        return {
+            "subject": "Security reviews at Schedulr",
+            "recipient_name": "Leo",
+            "opening_hook": "Schedulr's site says enterprise customers in healthcare and finance run their booking "
+                            "flows on it.",
+            "hook_evidence_id": ent,
+            "pain_point_1": "Regulated buyers often keep sending security reviews after the first audit.",
+            "pain_point_2": None,
+            "email_body": (
+                "Hi Leo,\n\nSchedulr's site says enterprise customers in healthcare and finance run their booking "
+                "flows on it.\n\nTeams selling into regulated buyers often find the second year harder than the "
+                "first: renewals, new frameworks and a steady stream of security reviews. That might already be on "
+                "your plate.\n\nSprinto keeps SOC 2 and ISO 27001 controls monitored continuously and collects "
+                "audit evidence automatically, so renewals and new frameworks stay manageable.\n\nWould a "
+                "15-minute chat next week be useful?\n\nBest,\nVikram"),
+            "personalisation_evidence": [{"claim": "Enterprise customers in healthcare and finance",
+                                          "evidence_id": ent}],
+            "cta": "Would a 15-minute chat next week be useful?"}
     return {"subject": "Hello", "recipient_name": "there", "opening_hook": "Hi", "hook_evidence_id": "E0",
             "pain_point_1": "", "email_body": "Hi there", "personalisation_evidence": [], "cta": ""}
 

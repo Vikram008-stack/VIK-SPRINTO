@@ -1,0 +1,19 @@
+{
+  "data": {
+    "domain": "schedulr.io",
+    "organization": "Schedulr",
+    "pattern": "{first}",
+    "emails": [
+      {"value": "leo@schedulr.io", "type": "personal", "confidence": 90, "first_name": "Leo", "last_name": "Park",
+       "position": "Head of Information Security", "seniority": "executive", "department": "it",
+       "verification": {"date": "2026-11-01", "status": "valid"}},
+      {"value": "maya@schedulr.io", "type": "personal", "confidence": 93, "first_name": "Maya", "last_name": "Chen",
+       "position": "CTO", "seniority": "executive", "department": "executive",
+       "verification": {"date": "2026-11-01", "status": "valid"}},
+      {"value": "omar@schedulr.io", "type": "personal", "confidence": 88, "first_name": "Omar", "last_name": "Diaz",
+       "position": "VP Marketing", "seniority": "executive", "department": "marketing",
+       "verification": {"date": "2026-11-01", "status": "valid"}}
+    ]
+  },
+  "meta": {"results": 3, "limit": 10, "offset": 0, "params": {"domain": "schedulr.io", "type": "personal"}}
+}

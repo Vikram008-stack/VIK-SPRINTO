@@ -249,5 +249,6 @@ def to_result(domain: str, out: LoopOutcome, prompt_version: str, rubric_version
     return QualificationResult(
         domain=domain, status=d.status, score=d.score, breakdown=d.breakdown, model_proposed_score=proposed,
         score_diff=diff, hard_disqualifier=d.hard_disqualifier, reasons=d.reasons, unknowns=d.unknowns,
-        confidence=d.confidence, handoff_note=d.handoff_note, rounds=out.rounds, rubric_version=rubric_version,
+        confidence=d.confidence, handoff_note=d.handoff_note, rounds=out.rounds, gates=d.gates,
+        rubric_version=rubric_version,
         prompt_version=prompt_version)

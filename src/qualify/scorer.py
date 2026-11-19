@@ -56,6 +56,7 @@ class Decision:
     confidence: Confidence
     handoff_note: Optional[str] = None
     max_possible: int = 100
+    gates: list = field(default_factory=list)       # [{gate, passed, detail}]
 
 
 # ------------------------------------------------------------------ helpers
@@ -201,7 +202,150 @@ def score_components(rubric: RubricCfg, facts: CompanyFacts, today: date) -> tup
         if c.points and not c.source_urls and not (c.component == "stage" and c.bucket == "unknown"):
             c.reason += " | points removed: no source_url"
             c.points = 0
+    explain(rubric, facts, comps, trig, today)
     return ScoreBreakdown(components=comps), trig
+
+
+# ------------------------------------------------------------------ Score -> Evidence -> Inference
+def _ev(text, source_url=None, quote=None, quality=None, event_date=None, points=0, counted=False, why=""):
+    return {"text": text, "quote": quote, "source_url": source_url,
+            "quality": getattr(quality, "value", quality), "event_date": event_date.isoformat() if event_date else None,
+            "points": points, "counted": counted, "why": why}
+
+
+def explain(rubric: RubricCfg, facts: CompanyFacts, comps: list[ComponentScore], trig: ScoredTrigger,
+            today: date) -> None:
+    """Attach, to every component, the evidence considered and the rule (inference) that produced its points."""
+    by = {c.component: c for c in comps}
+    src, snip = facts.field_sources, facts.field_snippets
+    sb = rubric.components["saas_fit"]["buckets"]
+
+    # A. SaaS fit
+    a = by["saas_fit"]
+    if facts.business_model:
+        a.evidence.append(_ev(f"What they sell: {facts.business_model.replace('_', ' ')}", src.get("business_model"),
+                              snip.get("business_model"), points=a.points, counted=True,
+                              why=f"bucket '{facts.business_model}' = {sb.get(facts.business_model, 0)} pts"))
+    if facts.product_description:
+        a.evidence.append(_ev(f"Product: {facts.product_description}", src.get("product_description"),
+                              snip.get("product_description"), why="context: confirms there is a working product"))
+    if facts.operating_status == "pre_product":
+        a.evidence.append(_ev("No working product yet", src.get("operating_status"), snip.get("operating_status"),
+                              counted=True, why="caps SaaS fit at 15"))
+    if not facts.business_model:
+        a.inference = "No sourced description of what they sell, so 0/25. Unknown is never guessed as SaaS."
+    elif facts.business_model in ("it_services", "non_software"):
+        a.inference = (f"'{facts.business_model.replace('_', ' ')}' scores 0/25 and is a hard disqualifier "
+                       f"(not selling software): rejected before any further research.")
+    else:
+        a.inference = (f"Rubric A: '{facts.business_model.replace('_', ' ')}' = {a.points}/25. QUALIFIED needs at "
+                       f"least {rubric.decision['qualified']['min_saas_fit']}: "
+                       + ("met." if a.points >= rubric.decision['qualified']['min_saas_fit'] else "not met."))
+
+    # B. Compliance trigger (strongest verified only)
+    b = by["compliance_trigger"]
+    tb = rubric.components["compliance_trigger"]["buckets"]
+    cands = all_trigger_signals(facts)
+    for s in sorted(cands, key=lambda x: -int(tb.get(x.trigger_type, 0))):
+        pts = int(tb.get(s.trigger_type, 0))
+        counted = trig.signal is not None and s.source_url == trig.signal.source_url and s.signal == trig.signal.signal
+        if counted:
+            why = "strongest verified trigger: counted"
+        elif pts < trig.points:
+            why = f"weaker than the counted trigger ({pts} < {trig.points}): strongest-only rule, not added"
+        else:
+            why = "same strength as the counted trigger: one event is counted once (no double counting)"
+        b.evidence.append(_ev(s.signal, s.source_url, s.snippet, s.evidence_quality, s.event_date,
+                              pts if counted else 0, counted,
+                              f"{s.trigger_type.replace('_', ' ')} = {pts} pts \u00b7 {why}"))
+    if trig.signal is not None and trig.bucket == "trust_page_no_need" and not cands:
+        b.evidence.append(_ev(trig.signal.signal, trig.signal.source_url, None, trig.signal.evidence_quality,
+                              None, trig.points, True, "existing certification / trust claims = 10 pts"))
+    for r in facts.rejected_triggers:
+        b.evidence.append(_ev(r["signal"], r["source_url"], r.get("quote"), "WEAK", None, 0, False,
+                              f"model proposed '{(r.get('proposed_type') or '').replace('_', ' ')}', rejected by code: "
+                              f"{r['why'].split(';')[0]}"))
+    for s in facts.compliance_signals:
+        if not s.trigger_type:
+            b.evidence.append(_ev(s.signal, s.source_url, s.snippet, s.evidence_quality, s.event_date, 0, False,
+                                  "context only: mentions compliance but is not a trigger"))
+    q = rubric.decision["qualified"]
+    if trig.signal is None or trig.points == 0:
+        b.inference = ("No sourced, verified compliance trigger, so 0/40. A security page, a generic GDPR line or "
+                       "enterprise marketing is not a reason to reach out now.")
+    else:
+        need_q = q["min_trigger_quality"]
+        ok_q = trig.signal.evidence_quality.rank >= EvidenceQuality[need_q].rank
+        b.inference = (f"Rubric B scores only the strongest verified trigger: "
+                       f"'{trig.bucket.replace('_', ' ')}' = {trig.points}/40. "
+                       + (f"QUALIFIED needs >= {q['min_trigger']} points: "
+                          + ("met" if trig.points >= q["min_trigger"] else "not met"))
+                       + f"; and evidence quality >= {need_q}: "
+                       + (f"met ({trig.signal.evidence_quality.value})." if ok_q
+                          else f"not met ({trig.signal.evidence_quality.value})."))
+
+    # C. Stage
+    c = by["stage"]
+    if facts.funding_stage:
+        c.evidence.append(_ev(f"Funding stage: {facts.funding_stage.replace('_', ' ')}", src.get("funding_stage"),
+                              snip.get("funding_stage"), points=c.points, counted=True,
+                              why=f"bucket '{c.bucket.replace('_', ' ')}' = {c.points} pts"))
+    if facts.open_roles_count:
+        c.evidence.append(_ev(f"{facts.open_roles_count} open roles", src.get("open_roles_count"), None,
+                              why="traction signal (counted by code from verified job titles)"))
+    if facts.has_enterprise_pricing_tier:
+        c.evidence.append(_ev("Enterprise tier on pricing", src.get("has_enterprise_pricing_tier"),
+                              snip.get("has_enterprise_pricing_tier"), why="traction signal"))
+    if facts.funding_stage:
+        c.inference = f"Rubric C: '{c.bucket.replace('_', ' ')}' = {c.points}/15."
+        if facts.funding_stage in ("seed", "bootstrapped"):
+            c.inference += " Seed / bootstrapped earn 10 only with traction evidence."
+    else:
+        c.inference = ("No funding stage stated in any source, so the rubric's 'unknown' default of 5/15 applies. "
+                       "Missing funding info is not a disqualifier.")
+
+    # D. Enterprise exposure
+    d = by["enterprise"]
+    eb = rubric.components["enterprise"]["buckets"]
+    for s in facts.enterprise_signals:
+        strong = s.evidence_quality in (EvidenceQuality.STRONG, EvidenceQuality.MEDIUM)
+        first = strong and d.bucket == "explicit_enterprise" and d.source_urls and s.source_url == d.source_urls[0] \
+            and not any(e["counted"] for e in d.evidence)
+        d.evidence.append(_ev(s.signal, s.source_url, s.snippet, s.evidence_quality, s.event_date,
+                              d.points if first else 0, bool(first),
+                              "explicit enterprise customer / contract: counted" if first else
+                              ("supports the same bucket (counted once)" if strong
+                               else "WEAK: context only, not explicit enterprise evidence")))
+    if facts.buyer_type:
+        counted = d.bucket in ("b2b_midmarket", "b2b_unclear", "b2c")
+        d.evidence.append(_ev(f"Buyer: {facts.buyer_type}", src.get("buyer_type"), snip.get("buyer_type"),
+                              points=d.points if counted else 0, counted=counted,
+                              why="decides the bucket when no explicit enterprise evidence exists"))
+    d.inference = (f"Rubric D: '{d.bucket.replace('_', ' ')}' = {d.points}/10. Explicit enterprise customers or "
+                   f"contracts ({eb['explicit_enterprise']}) beat B2B mid-market ({eb['b2b_midmarket']}), B2B unclear "
+                   f"({eb['b2b_unclear']}), B2C ({eb['b2c']}).")
+
+    # E. Recency
+    e = by["recency"]
+    if trig.signal is not None and trig.points > 0:
+        e.evidence.append(_ev(f"Scored trigger: {trig.signal.signal}", trig.signal.source_url, None,
+                              trig.signal.evidence_quality, trig.signal.event_date, e.points, True,
+                              "event date taken from the source" if trig.signal.event_date else
+                              "the source gives no date"))
+        if trig.signal.event_date:
+            days = (today - trig.signal.event_date).days
+            e.inference = (f"Uses the event date ({trig.signal.event_date.isoformat()}, "
+                           f"{'in the future' if days < 0 else f'{days} days ago'}), never the crawl date: "
+                           f"<=90d 10 \u00b7 <=180d 7 \u00b7 <=365d 4 \u00b7 older 1. Result {e.points}/10.")
+        else:
+            e.inference = ("The trigger is undated, so 0/10. The date we saw the page is never used as the event "
+                           "date.")
+    else:
+        e.inference = "No trigger was scored, so there is nothing to date: 0/10."
+
+    for comp in comps:
+        if "points removed: no source_url" in comp.reason:
+            comp.inference += " Points removed: no source URL backs this claim."
 
 
 # ------------------------------------------------------------------ decision
@@ -241,7 +385,9 @@ def decide(rubric: RubricCfg, facts: CompanyFacts, ctx: QualContext, unmet_rows:
     hd = hard_disqualifier(facts, ctx)
     if hd:
         return Decision(QualStatus.DUPLICATE if hd == "duplicate" else QualStatus.REJECTED, score, breakdown, trig,
-                        hd, [f"hard disqualifier: {hd}"], unknowns, Confidence.HIGH, max_possible=max_possible)
+                        hd, [f"hard disqualifier: {hd}"], unknowns, Confidence.HIGH, max_possible=max_possible,
+                        gates=[{"gate": "no hard disqualifier", "passed": False,
+                                "detail": hd.replace("_", " ") + " overrides the score"}])
 
     certified = already_certified(facts)
     if certified and ctx.already_certified_policy == "disqualify":
@@ -284,6 +430,17 @@ def decide(rubric: RubricCfg, facts: CompanyFacts, ctx: QualContext, unmet_rows:
         "no context needing human research": not force,
     }
     failed = [k for k, ok in gates.items() if not ok]
+    gate_list = [{"gate": "no hard disqualifier", "passed": True, "detail": "none found"}] + [
+        {"gate": k, "passed": bool(ok), "detail": {
+            f"score >= {q['min_score']}": f"score {score}",
+            f"SaaS fit >= {q['min_saas_fit']}": f"SaaS fit {saas}",
+            f"trigger >= {q['min_trigger']}": f"trigger {trig.points}",
+            f"trigger evidence >= {q['min_trigger_quality']}":
+                (trig.signal.evidence_quality.value if trig.signal else "no trigger"),
+            "not already certified (or new framework targeted)":
+                ("claims " + ", ".join(facts.certifications_claimed)) if certified else "no SOC 2 / ISO 27001 claim",
+            "no context needing human research": "; ".join(force) if force else "none",
+        }.get(k, "")} for k, ok in gates.items()]
 
     plausible_b2b_saas = saas >= q["min_saas_fit"] and facts.buyer_type in ("business", "both", None)
     lo, _hi = rubric.decision["needs_research_band"]
@@ -324,4 +481,5 @@ def decide(rubric: RubricCfg, facts: CompanyFacts, ctx: QualContext, unmet_rows:
     if status in (QualStatus.NEEDS_RESEARCH, QualStatus.INSUFFICIENT_DATA):
         handoff = ("Human review: " + "; ".join(reasons)
                    + (f". Unknowns: {', '.join(unknowns)}" if unknowns else ""))
-    return Decision(status, score, breakdown, trig, None, reasons, unknowns, conf, handoff, max_possible)
+    return Decision(status, score, breakdown, trig, None, reasons, unknowns, conf, handoff, max_possible,
+                    gates=gate_list)

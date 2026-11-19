@@ -32,6 +32,44 @@ ENUMS = {
 }
 POLICY_CERT_RE = re.compile(r"SOC ?2|ISO[ /-]?(IEC )?27001", re.I)
 
+# ---- trigger validation: the quoted evidence must contain what the trigger type claims (code, not the model)
+_FRAMEWORK = r"(SOC ?[12]|ISO[ /-]?(IEC )?27\d{3}|GDPR|HIPAA|PCI|FedRAMP|certif\w*|complian\w*|attestation)"
+_SECURITY = r"(secur\w*|complian\w*|SOC ?2|ISO ?27001|GDPR|HIPAA|audit\w*|SSO|SAML|data residency|" \
+            r"penetration test|pen ?test|vendor (risk|review|assessment)|questionnaire|due diligence|trust center)"
+TRIGGER_RULES: dict[str, tuple[re.Pattern, str]] = {
+    "explicit_audit_target": (re.compile(rf"(audit\w*|certif\w*|attestation|{_FRAMEWORK})", re.I),
+                              "must name an audit / certification"),
+    "stated_deadline": (re.compile(rf"(audit\w*|deadline|by (Q[1-4]|20\d\d|end of)|{_FRAMEWORK})", re.I),
+                        "must name a compliance deadline or audit prep"),
+    "customer_requires_cert": (re.compile(rf"(requir\w*|mandat\w*|ask\w* for|need\w*|demand\w*).{{0,80}}{_FRAMEWORK}|"
+                                          rf"{_FRAMEWORK}.{{0,80}}(requir\w*|mandat\w*)", re.I),
+                               "must say a customer requires a certification"),
+    "grc_leader_hire": (re.compile(r"(complian\w*|GRC|governance|risk|secur\w*|CISO|trust|privacy)", re.I),
+                        "must be a compliance / GRC / security role"),
+    "procurement_questionnaire": (re.compile(r"(questionnaire|procurement|vendor (risk|review|assessment)|"
+                                             r"due diligence|security review)", re.I),
+                                  "must mention procurement or security questionnaires"),
+    "enterprise_expansion": (re.compile(_SECURITY, re.I),
+                             "enterprise expansion counts only with an identifiable security requirement"),
+    "trust_page_no_need": (re.compile(_SECURITY, re.I), "must mention security / trust"),
+    "generic_mention": (re.compile(_SECURITY, re.I), "must mention security / compliance"),
+}
+STRONG_TYPES = {"explicit_audit_target", "customer_requires_cert", "stated_deadline"}
+NAMED_CUSTOMER_RE = re.compile(r"\b(customers? (like|such as|including)|trusted by|used by|[A-Z][a-z]+ (Inc|Ltd|Corp)\b)")
+
+
+def trigger_supported(trigger_type: Optional[str], signal: str, snippet: str) -> tuple[bool, str]:
+    """Does the QUOTED evidence (not the model's paraphrase) support the proposed trigger type?"""
+    if not trigger_type:
+        return True, ""
+    rule = TRIGGER_RULES.get(trigger_type)
+    if rule is None:
+        return False, f"unknown trigger type {trigger_type}"
+    pattern, need = rule
+    if pattern.search(snippet or ""):
+        return True, ""
+    return False, f"{need}; the quoted text does not ({(snippet or '')[:80]!r})"
+
 
 @dataclass
 class ExtractionResult:
@@ -174,6 +212,7 @@ def verify(out: ExtractionOut, domain: str, texts: dict[str, str],
             val = str(val).lower() in ("true", "yes", "1")
         setattr(facts, name, val)
         facts.field_sources[name] = first_chunk[_norm_url(f.source_url)].source_url
+        facts.field_snippets[name] = " ".join((f.snippet or "").split()[:25])
 
     for cf in out.certifications_claimed:
         f = check(cf, "certification")
@@ -193,18 +232,33 @@ def verify(out: ExtractionOut, domain: str, texts: dict[str, str],
         chunk = first_chunk[url]
         ev = parse_event_date(s.event_date)
         q = EvidenceQuality(s.evidence_quality)
-        # code-level caps on model-proposed quality
-        if s.trigger_type in ("generic_mention", "trust_page_no_need"):
+        trigger_type = s.trigger_type
+        # code checks that the QUOTED text supports the trigger type the model proposed
+        ok, why = trigger_supported(trigger_type, s.signal, s.snippet)
+        if not ok:
+            facts.rejected_triggers.append({"signal": s.signal[:200], "quote": " ".join(s.snippet.split()[:25]),
+                                            "proposed_type": trigger_type, "source_url": chunk.source_url,
+                                            "why": why})
+            dropped.append(f"trigger demoted ({trigger_type}): {why}")
+            trigger_type = None
             q = EvidenceQuality.WEAK
+        # code-level caps on model-proposed quality (rubric: STRONG only for explicit audit / requirement evidence)
+        if trigger_type in ("generic_mention", "trust_page_no_need"):
+            q = EvidenceQuality.WEAK
+        if q == EvidenceQuality.STRONG and trigger_type not in STRONG_TYPES and s.kind == "compliance":
+            q = EvidenceQuality.MEDIUM
+        if q == EvidenceQuality.STRONG and s.kind == "enterprise" and trigger_type not in STRONG_TYPES \
+                and not NAMED_CUSTOMER_RE.search(s.snippet or ""):
+            q = EvidenceQuality.MEDIUM
         if ev is None and chunk.page_type in ("news", "blog") and q == EvidenceQuality.STRONG:
             q = EvidenceQuality.WEAK
-        event_key = (s.trigger_type, ev, _norm(s.signal)[:60])
+        event_key = (trigger_type, ev, _norm(s.signal)[:60])
         if event_key in seen_events:
             continue
         seen_events.add(event_key)
         snippet = " ".join(s.snippet.split()[:25])
         sig = Signal(signal=s.signal, source_url=chunk.source_url, snippet=snippet, event_date=ev,
-                     observed_at=chunk.fetched_at, evidence_quality=q, trigger_type=s.trigger_type,
+                     observed_at=chunk.fetched_at, evidence_quality=q, trigger_type=trigger_type,
                      source_origin="fetched_page")
         (facts.compliance_signals if s.kind == "compliance" else facts.enterprise_signals).append(sig)
 
@@ -275,6 +329,10 @@ def merge_facts(base: CompanyFacts, new: CompanyFacts, focus_fields: Optional[li
         if (h.source_url, h.title.lower()) not in hk:
             merged.hiring_signals.append(h)
     merged.conflicts = list(dict.fromkeys(merged.conflicts + new.conflicts))
+    for k, v in new.field_snippets.items():
+        merged.field_snippets.setdefault(k, v)
+    seen_rej = {(r["source_url"], r["signal"]) for r in merged.rejected_triggers}
+    merged.rejected_triggers += [r for r in new.rejected_triggers if (r["source_url"], r["signal"]) not in seen_rej]
     merged.missing_fields = [n for n in SCALAR_FIELDS if getattr(merged, n) is None]
     if new.extraction_notes:
         merged.extraction_notes = (merged.extraction_notes + " | " + new.extraction_notes).strip(" |")[:1000]

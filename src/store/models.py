@@ -239,6 +239,10 @@ class CompanyFacts(_Model):
     field_sources: dict[str, str] = Field(default_factory=dict)
     # scalar facts that two sources disagree on (e.g. funding stage) -> NEEDS_RESEARCH
     conflicts: list[str] = Field(default_factory=list)
+    # verbatim quote that supports each scalar fact (for the evidence trail)
+    field_snippets: dict[str, str] = Field(default_factory=dict)
+    # model-proposed triggers that code rejected, kept for transparency (0 points)
+    rejected_triggers: list[dict] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- step 3: qualification
@@ -249,6 +253,9 @@ class ComponentScore(_Model):
     bucket: str
     reason: str
     source_urls: list[str] = Field(default_factory=list)
+    # Score -> Evidence -> Inference: every signal considered for this component, and the rule that turned it into points
+    evidence: list[dict] = Field(default_factory=list)   # {text, quote, source_url, quality, event_date, points, counted, why}
+    inference: str = ""
 
 
 class ScoreBreakdown(_Model):
@@ -286,6 +293,7 @@ class QualificationResult(_Model):
     confidence: Confidence = Confidence.LOW      # kept separate from score
     handoff_note: Optional[str] = None
     rounds: list[QualificationRound] = Field(default_factory=list)
+    gates: list[dict] = Field(default_factory=list)      # [{gate, passed, detail}] -> verdict
     rubric_version: str = "v1"
     prompt_version: Optional[str] = None
 

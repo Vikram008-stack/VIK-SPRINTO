@@ -40,7 +40,7 @@
   const daysAgo = d => { if(!d) return ''; const t = (D.today ? new Date(D.today) : new Date()); const n = Math.round((t - new Date(d))/864e5); return n<0? `in ${-n} days` : n===0?'today':`${n} days ago`; };
   let filter = 'all', currentKey = null, query = '';
   const key = o => o._key || o.domain;
-  const opts = { onSend: null, sendLabel: null, onFollowup: null };
+  const opts = { onSend: null, sendLabel: null, onFollowup: null, onReview: null };
 
   function groups(){ const c = {ready:0,human:0,nofit:0,dup:0,running:0}; OUT.forEach(o => c[(STATUS[o.status]||['','','human'])[2]]++); return c; }
   function sortOut(){ OUT.sort((a,b) => (ORDER[a.status]??9)-(ORDER[b.status]??9) || (((b.qualification||{}).score)||0)-(((a.qualification||{}).score)||0)); }
@@ -95,16 +95,45 @@
   function breakdown(o){
     const q = o.qualification||{}; const comps = (q.breakdown||{}).components||[];
     if(!comps.length) return '';
+    const qc = {STRONG:'g',MEDIUM:'i',WEAK:'w'};
     const rows = comps.map(c => { const [t,sub] = COMP[c.component]||[c.component,''];
       const pct = c.max_points? Math.round(100*c.points/c.max_points):0;
       const col = pct>=75?'var(--good)':pct>=40?'var(--accent)':pct>0?'var(--warn)':'var(--line)';
-      return `<div class="bar"><div class="lbl">${esc(t)}<small>${esc(sub)}</small></div>
-        <div class="track" role="img" aria-label="${c.points} of ${c.max_points}"><div class="fill" style="width:${pct}%;background:${col}"></div></div>
-        <div class="pts">${c.points}/${c.max_points}</div>
-        <div class="reason">${esc(c.reason)}${(c.source_urls||[]).length?' · '+c.source_urls.map(u=>link(u)).join(' · '):''}</div></div>`; }).join('');
-    const mp = q.model_proposed_score!=null ? `<p class="small" style="margin-top:12px">The model suggested ${q.model_proposed_score}; the rule-based score above is final${q.score_diff?` (difference ${q.score_diff>0?'+':''}${q.score_diff})`:''}.</p>` : '';
-    const reasons = (q.reasons||[]).length? `<details><summary>Decision rules applied</summary><ul>${q.reasons.map(r=>`<li>${esc(r)}</li>`).join('')}</ul></details>`:'';
-    return `<section class="panel"><h2>Why this verdict</h2><div class="bars">${rows}</div>${mp}${reasons}</section>`;
+      const ev = (c.evidence||[]);
+      const evHtml = ev.length ? ev.map(e => `<div class="fl-ev${e.counted?' on':''}">
+          <div class="top">${e.counted?`<span class="pill g">counted +${e.points}</span>`:`<span class="pill m">not counted</span>`}
+            ${e.quality?`<span class="pill ${qc[e.quality]||'m'}">${esc(String(e.quality).toLowerCase())}</span>`:''}
+            ${e.event_date?`<span class="small">happened ${fmtDate(e.event_date)}</span>`:''}</div>
+          <div class="txt">${esc(e.text)}</div>${e.quote?`<q>${esc(e.quote)}</q>`:''}
+          <div class="small fl-why">${esc(e.why)}${e.source_url?' · '+link(e.source_url):''}</div></div>`).join('')
+        : `<div class="fl-ev none"><div class="txt">No evidence found for this part of the score.</div><div class="small">Missing facts stay empty: nothing is guessed.</div></div>`;
+      return `<div class="fl-row">
+        <div class="fl-score"><div class="fl-k">Score</div><div class="lbl">${esc(t)}<small>${esc(sub)}</small></div>
+          <div class="pts">${c.points}<span>/${c.max_points}</span></div>
+          <div class="track" role="img" aria-label="${c.points} of ${c.max_points}"><div class="fill" style="width:${pct}%;background:${col}"></div></div>
+          <div class="small">bucket: ${esc(String(c.bucket).replace(/_/g,' '))}</div></div>
+        <div class="fl-arrow" aria-hidden="true">←</div>
+        <div class="fl-col"><div class="fl-k">Evidence</div>${evHtml}</div>
+        <div class="fl-arrow" aria-hidden="true">→</div>
+        <div class="fl-col"><div class="fl-k">Inference (rule applied)</div><div class="fl-inf">${esc(c.inference || c.reason)}</div></div>
+      </div>`; }).join('');
+    const total = comps.reduce((a,c)=>a+c.points,0);
+    const gates = (q.gates||[]);
+    const s = STATUS[o.status]||[o.status,'m'];
+    const verdictPill = `<span class="pill ${(STATUS[q.status]||s)[1]}">${esc((STATUS[q.status]||s)[0])}</span>`;
+    const decision = gates.length ? `<div class="fl-decision">
+        <div class="fl-step"><div class="fl-k">Total score</div><div class="fl-big">${total}<span>/100</span></div>
+          <div class="small">${comps.map(c=>`${(COMP[c.component]||[c.component])[0]} ${c.points}`).join(' + ')}</div></div>
+        <div class="fl-arrow" aria-hidden="true">→</div>
+        <div class="fl-step grow"><div class="fl-k">Qualification gates (all must pass)</div>
+          <ul class="fl-gates">${gates.map(g=>`<li class="${g.passed?'ok':'no'}"><span aria-hidden="true">${g.passed?'✓':'✗'}</span> ${esc(g.gate)} <span class="small">(${esc(g.detail)})</span></li>`).join('')}</ul></div>
+        <div class="fl-arrow" aria-hidden="true">→</div>
+        <div class="fl-step"><div class="fl-k">Verdict</div>${verdictPill}<div class="small" style="margin-top:6px">${esc((q.reasons||[])[0]||'')}</div></div>
+      </div>` : '';
+    const mp = q.model_proposed_score!=null ? `<p class="small" style="margin-top:12px">The AI model suggested ${q.model_proposed_score}; the rule-based score is final${q.score_diff?` (difference ${q.score_diff>0?'+':''}${q.score_diff})`:''}. The model judges evidence; code decides the points.</p>` : '';
+    return `<section class="panel"><h2>How the score was built: score ← evidence → inference</h2>
+      <p class="small" style="margin-top:-6px">Each part of the score shows the evidence the agent found (with the exact quote and source), which pieces counted, and the rubric rule that turned them into points.</p>
+      <div class="fl">${rows}</div>${decision}${mp}</section>`;
   }
   function evidence(o){
     const f = o.facts||{}; const sigs = [...(f.compliance_signals||[]), ...(f.enterprise_signals||[])];
@@ -120,7 +149,7 @@
         <div class="small" style="margin-top:6px">${link(hires[0].source_url)}</div></div>`:'';
     const certs = (f.certifications_claimed||[]).length? `<div class="evc"><div class="top"><span class="pill m">already claims</span></div><div class="txt">${f.certifications_claimed.map(esc).join(', ')}</div></div>`:'';
     const conflicts = (f.conflicts||[]).length? `<div class="evc"><div class="top"><span class="pill w">conflict</span></div><div class="txt">${f.conflicts.map(esc).join('<br>')}</div></div>`:'';
-    return `<section class="panel"><h2>Evidence we found</h2><div class="ev">${cards}${hl}${certs}${conflicts}</div></section>`;
+    return `<section class="panel"><h2>All evidence collected</h2><div class="ev">${cards}${hl}${certs}${conflicts}</div></section>`;
   }
   function research(o){
     const q = o.qualification||{}; const rounds = q.rounds||[];
@@ -202,6 +231,30 @@
       ${emails||crm?`<details open><summary>What the agent produced (${extra.length} email${extra.length===1?'':'s'}${f.booked_slot?', 1 booking':''}${f.crm_record?', 1 CRM record':''})</summary>${emails}${crm}</details>`:''}
     </section>`;
   }
+
+  const REVIEWABLE = ['NEEDS_RESEARCH','INSUFFICIENT_DATA','REJECTED','NO_CONTACT_FOUND','DRAFT_NEEDS_HUMAN'];
+  function review(o){
+    const h = o.human_override;
+    const banner = h ? `<section class="panel override ${h.decision==='approve'?'ok':'no'}"><div class="row">
+        <span class="pill ${h.decision==='approve'?'g':'b'}">${h.decision==='approve'?'Approved by a human':'Rejected by a human'}</span>
+        <span class="small">${esc(h.by||'reviewer')} \u00b7 ${esc(new Date(h.at).toLocaleString())}</span></div>
+        <p style="margin:8px 0 0">"${esc(h.reason)}"</p>
+        <p class="small" style="margin:6px 0 0">The rules said <b>${esc((STATUS[h.original_status]||[h.original_status])[0])}</b>${h.original_score!=null?` (score ${h.original_score}/100)`:''}. That verdict and its evidence stay on record below.</p></section>` : '';
+    if (!opts.onReview || h || !REVIEWABLE.includes(o.status)) return banner;
+    const q = o.qualification||{};
+    const hd = q.hard_disqualifier && q.hard_disqualifier !== 'already_certified' ? q.hard_disqualifier : null;
+    const failed = (q.gates||[]).filter(g=>!g.passed).map(g=>g.gate);
+    return banner + `<section class="panel review"><h2>Your decision</h2>
+      <p style="margin:0 0 10px;color:var(--ink-2)">The rules did not qualify this company${q.score!=null?` (score ${q.score}/100`:''}${failed.length?`; not met: ${esc(failed.join(', '))}`:''}${q.score!=null?')':''}.
+        If you know something the public evidence doesn't show, approve it and the agent will pick the decision-maker,
+        write the pain points and draft the email. Your reason is logged with the decision.</p>
+      ${hd?`<p class="notice show warn">Approval is blocked: "${esc(hd.replace(/_/g,' '))}" is a hard disqualifier. You can still reject it.</p>`:''}
+      <textarea id="rv-reason" rows="2" placeholder="Why? e.g. Their CTO told us they start SOC 2 in Q1; renewal is coming up" aria-label="Reason for your decision"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="btn primary" type="button" id="rv-approve"${hd?' disabled':''}>Approve &amp; continue: contact \u2192 draft email</button>
+        <button class="btn" type="button" id="rv-reject">Reject</button>
+        <span class="small" id="rv-msg"></span></div></section>`;
+  }
   function issues(o){
     const f = o.failures||[]; const flags = o.flags||[];
     if(!f.length && !flags.length) return '';
@@ -212,7 +265,7 @@
     const det = document.getElementById('detail'); if (!det) return;
     const o = OUT.find(x => key(x)===currentKey);
     if(!o){ det.innerHTML = `<section class="panel"><p class="empty">Results appear here as each company finishes.</p></section>`; return; }
-    det.innerHTML = verdict(o) + `<div class="two"><div class="detail">${breakdown(o)}${person(o)}</div><div class="detail">${evidence(o)}${research(o)}</div></div>` + email(o) + followup(o) + issues(o);
+    det.innerHTML = verdict(o) + review(o) + breakdown(o) + `<div class="two"><div class="detail">${person(o)}${research(o)}</div><div class="detail">${evidence(o)}</div></div>` + email(o) + followup(o) + issues(o);
     const c = document.getElementById('copy');
     if(c) c.onclick = () => { navigator.clipboard?.writeText(document.getElementById('emailbody').textContent).then(()=>{ c.textContent='Copied'; setTimeout(()=>c.textContent='Copy email text',1400); }); };
     det.querySelectorAll('[data-sc]').forEach(b => b.onclick = async () => { b.disabled = true; b.textContent = 'Running...';
@@ -220,6 +273,16 @@
     const fr = document.getElementById('fu-run');
     if (fr) fr.onclick = async () => { const t = document.getElementById('fu-reply').value;
       fr.disabled = true; fr.textContent = 'Running...'; await opts.onFollowup(o, { reply_text: t }); renderList(); };
+    const ra = document.getElementById('rv-approve'), rj = document.getElementById('rv-reject');
+    const doReview = async (decision, btn) => {
+      const reason = (document.getElementById('rv-reason').value || '').trim();
+      const msg = document.getElementById('rv-msg');
+      if (reason.length < 3) { msg.textContent = 'Please write a short reason first (it is logged).'; document.getElementById('rv-reason').focus(); return; }
+      [ra, rj].forEach(b => b && (b.disabled = true));
+      btn.textContent = decision === 'approve' ? 'Finding the contact and drafting… (up to 2 min)' : 'Saving…';
+      await opts.onReview(o, decision, reason); renderList(); };
+    if (ra) ra.onclick = () => doReview('approve', ra);
+    if (rj) rj.onclick = () => doReview('reject', rj);
     const sb = document.getElementById('sendbtn');
     if(sb) sb.onclick = async () => { sb.disabled = true; sb.textContent = 'Sending…'; try { await opts.onSend(o); } finally { renderList(); } };
   }

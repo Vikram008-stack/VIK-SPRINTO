@@ -88,6 +88,7 @@ class CompanyOutcome:
     seconds: float = 0.0
     finished_at: Optional[str] = None
     versions: dict = field(default_factory=dict)
+    human_override: Optional[dict] = None    # {decision, reason, by, at, original_status, original_score}
 
     def to_json(self) -> str:
         return json.dumps(_j(self), indent=2, default=str)
@@ -103,16 +104,17 @@ class RunOptions:
 
 NEXT_ACTION = {
     "QUALIFIED": "Proceed to contact selection",
-    "SENT": "Growth Lead reviews the demo email; approve before any real send",
-    "DRAFTED": "Review the draft in the console; re-run with --send to deliver it to the demo inbox",
-    "DRAFT_NEEDS_HUMAN": "Rewrite the draft by hand: guardrails failed twice",
-    "NO_CONTACT_FOUND": "Find a decision-maker manually (add to config/manual_contacts.yaml)",
-    "NEEDS_RESEARCH": "Human research: verify the open questions listed, then re-run with --refresh",
-    "INSUFFICIENT_DATA": "Human review queue: the loop cap was reached with unknowns",
-    "REJECTED": "No action: does not fit the ICP (see evidence)",
+    "SENT": "Delivered to the demo inbox. Review it there; nothing goes to a real prospect without approval",
+    "DRAFTED": "Review the draft below, then send it to your demo inbox or run the follow-up agent",
+    "DRAFT_NEEDS_HUMAN": "Rewrite the draft by hand: it failed the quality checks twice, so it was not sent",
+    "NO_CONTACT_FOUND": "No suitable decision-maker was found; add one manually (config/manual_contacts.yaml)",
+    "NEEDS_RESEARCH": "Check the open questions below. If you're satisfied, approve it manually to pick the "
+                      "contact and draft the email, or reject it",
+    "INSUFFICIENT_DATA": "Not enough public evidence. Approve manually if you know more, or reject it",
+    "REJECTED": "No action: it does not fit the ICP (see the evidence)",
     "DUPLICATE": "No action: duplicate of another input",
-    "SEND_FAILED": "Fix the Gmail setup and re-run with --send",
-    "FAILED": "Inspect the failure reason and re-run",
+    "SEND_FAILED": "Connect Gmail, then send again",
+    "FAILED": "Run this company again; if it repeats, check the reason code",
 }
 
 
@@ -257,55 +259,7 @@ class Pipeline:
                 why = "; ".join(result.reasons)[:300]
                 return self._finish(o, session, result.status.value, why)
 
-            # ---------------- Step 4: decision-maker
-            choice = self._choose_contact(o, domain, facts)
-            if choice.status != "CHOSEN" or not choice.chosen:
-                self._fail(o, Step.CONTACTS, ReasonCode.NO_CONTACT_FOUND, choice.why_this_person)
-                return self._finish(o, session, "NO_CONTACT_FOUND", choice.why_this_person[:300])
-            contact = choice.chosen
-
-            # ---------------- Step 5: pain points
-            evidence, pflags, _n = gather_evidence(self.llm, self.search, facts, contact, budget, self.run_id,
-                                                   prior=out.search_evidence)
-            o.evidence = _j(evidence)
-            pains, flags2 = generate_pain_points(self.llm, facts, contact, evidence, budget, self.run_id)
-            o.pain_points = _j(pains)
-            o.pain_flags = pflags + flags2
-            for f in o.pain_flags:
-                if f.startswith("search_unavailable"):
-                    self._fail(o, Step.PAIN, ReasonCode.SEARCH_UNAVAILABLE, f)
-                elif f == "fewer_than_two_pain_points":
-                    self._fail(o, Step.PAIN, ReasonCode.FEWER_THAN_TWO_PAIN_POINTS, f)
-            for i, pp in enumerate(pains, 1):
-                self.db.insert("pain_points", {"run_id": self.run_id, "domain": domain, "position": i,
-                                               "signal": pp.signal, "source_url": pp.source_url,
-                                               "event_date": pp.event_date, "hypothesis": pp.hypothesis,
-                                               "why_it_matters_to_this_role": pp.why_it_matters_to_this_role,
-                                               "confidence": pp.confidence, "prompt_version":
-                                                   p.llm.prompt_versions.get("pain"),
-                                               "created_at": datetime.now(timezone.utc)})
-            if not pains:
-                self._fail(o, Step.PAIN, ReasonCode.NO_PAIN_EVIDENCE, "no evidence-backed pain point")
-                return self._finish(o, session, "DRAFT_NEEDS_HUMAN", "no evidence-backed pain point to write from")
-
-            # ---------------- Step 6: draft
-            why = "; ".join(result.reasons)
-            dr = draft_email(self.llm, p.email, facts, contact, why, evidence, pains, budget, self.run_id)
-            o.draft = _j(dr.draft) if dr.draft else None
-            o.draft_attempts = [{"attempt": a["attempt"], "errors": a["errors"], "words": a["words"]}
-                                for a in dr.attempts]
-            for a in dr.attempts:
-                self.db.insert("emails", {"run_id": self.run_id, "domain": domain, "attempt": a["attempt"],
-                                          "draft_json": a["draft"], "guardrail_ok": not a["errors"],
-                                          "guardrail_errors": a["errors"], "word_count": a["words"],
-                                          "prompt_version": p.llm.prompt_versions.get("draft"),
-                                          "created_at": datetime.now(timezone.utc)})
-            if not dr.ok:
-                self._fail(o, Step.DRAFT, ReasonCode.GUARDRAIL_FAILED, "; ".join(dr.attempts[-1]["errors"]))
-                return self._finish(o, session, "DRAFT_NEEDS_HUMAN", "guardrails failed twice; not sent")
-
-            # ---------------- Step 7: send (demo inbox only)
-            return self._send(o, session, dr.draft, contact, opts)
+            return self._outreach(o, session, facts, "; ".join(result.reasons), out.search_evidence, budget, opts)
 
         except BudgetExceeded as e:
             self._fail(o, Step.QUALIFY, ReasonCode.BUDGET_EXCEEDED, str(e))
@@ -316,6 +270,101 @@ class Pipeline:
             return self._finish(o, session, status, f"{e.reason.value}: {e.detail[:200]}")
         finally:
             o.cost = budget.snapshot()
+
+
+    # ------------------------------------------------------------------ steps 4-7 (shared by run + human approval)
+    def _outreach(self, o: CompanyOutcome, session, facts, why: str, prior_evidence, budget: CompanyBudget,
+                  opts: RunOptions) -> CompanyOutcome:
+        p = self.s.pipeline
+        domain = o.domain
+        # ---------------- Step 4: decision-maker
+        choice = self._choose_contact(o, domain, facts)
+        if choice.status != "CHOSEN" or not choice.chosen:
+            self._fail(o, Step.CONTACTS, ReasonCode.NO_CONTACT_FOUND, choice.why_this_person)
+            return self._finish(o, session, "NO_CONTACT_FOUND", choice.why_this_person[:300])
+        contact = choice.chosen
+
+        # ---------------- Step 5: pain points
+        evidence, pflags, _n = gather_evidence(self.llm, self.search, facts, contact, budget, self.run_id,
+                                               prior=prior_evidence)
+        o.evidence = _j(evidence)
+        pains, flags2 = generate_pain_points(self.llm, facts, contact, evidence, budget, self.run_id)
+        o.pain_points = _j(pains)
+        o.pain_flags = pflags + flags2
+        for f in o.pain_flags:
+            if f.startswith("search_unavailable"):
+                self._fail(o, Step.PAIN, ReasonCode.SEARCH_UNAVAILABLE, f)
+            elif f == "fewer_than_two_pain_points":
+                self._fail(o, Step.PAIN, ReasonCode.FEWER_THAN_TWO_PAIN_POINTS, f)
+        for i, pp in enumerate(pains, 1):
+            self.db.insert("pain_points", {"run_id": self.run_id, "domain": domain, "position": i,
+                                           "signal": pp.signal, "source_url": pp.source_url,
+                                           "event_date": pp.event_date, "hypothesis": pp.hypothesis,
+                                           "why_it_matters_to_this_role": pp.why_it_matters_to_this_role,
+                                           "confidence": pp.confidence, "prompt_version":
+                                               p.llm.prompt_versions.get("pain"),
+                                           "created_at": datetime.now(timezone.utc)})
+        if not pains:
+            self._fail(o, Step.PAIN, ReasonCode.NO_PAIN_EVIDENCE, "no evidence-backed pain point")
+            return self._finish(o, session, "DRAFT_NEEDS_HUMAN", "no evidence-backed pain point to write from")
+
+        # ---------------- Step 6: draft
+        dr = draft_email(self.llm, p.email, facts, contact, why, evidence, pains, budget, self.run_id)
+        o.draft = _j(dr.draft) if dr.draft else None
+        o.draft_attempts = [{"attempt": a["attempt"], "errors": a["errors"], "words": a["words"]}
+                            for a in dr.attempts]
+        for a in dr.attempts:
+            self.db.insert("emails", {"run_id": self.run_id, "domain": domain, "attempt": a["attempt"],
+                                      "draft_json": a["draft"], "guardrail_ok": not a["errors"],
+                                      "guardrail_errors": a["errors"], "word_count": a["words"],
+                                      "prompt_version": p.llm.prompt_versions.get("draft"),
+                                      "created_at": datetime.now(timezone.utc)})
+        if not dr.ok:
+            self._fail(o, Step.DRAFT, ReasonCode.GUARDRAIL_FAILED, "; ".join(dr.attempts[-1]["errors"]))
+            return self._finish(o, session, "DRAFT_NEEDS_HUMAN", "guardrails failed twice; not sent")
+
+        # ---------------- Step 7: send (demo inbox only)
+        return self._send(o, session, dr.draft, contact, opts)
+
+
+    def approve(self, outcome: dict, decision: str, reason: str, reviewer: str = "reviewer",
+                opts: Optional[RunOptions] = None) -> CompanyOutcome:
+        """Human-in-the-loop override for a company the rules did not qualify. The original verdict and score are
+        kept; the human decision and reason are logged. Approve -> steps 4-7 run on the facts already gathered."""
+        from src.store.models import CompanyFacts
+        opts = opts or RunOptions(dry_run=True, command="approve")
+        o = CompanyOutcome(**{k: v for k, v in outcome.items() if k in CompanyOutcome.__dataclass_fields__})
+        o.run_id = self.run_id
+        q = o.qualification or {}
+        o.human_override = {"decision": decision, "reason": reason, "by": reviewer,
+                            "at": datetime.now(timezone.utc).isoformat(), "original_status": o.status,
+                            "original_score": q.get("score")}
+        self.db.start_run(self.run_id, "approve", {"domain": o.domain, "decision": decision}, opts.dry_run,
+                          self.s.rubric.rubric_version, config_hash())
+        self.db.upsert_company(o.domain, o.input_raw, self.run_id)
+        o.loop_notes = list(o.loop_notes) + [f"human {decision}: {reason}"]
+        if decision == "reject":
+            out = self._finish(o, None, "REJECTED", f"Rejected by a human reviewer: {reason}")
+            self._write_report(out)
+            return out
+        budget = CompanyBudget(max_cost_usd=self.s.pipeline.run.max_cost_usd_per_company,
+                               max_seconds=self.s.pipeline.run.max_seconds_per_company)
+        try:
+            facts = CompanyFacts(**(o.facts or {"domain": o.domain}))
+            why = f"Approved by a human reviewer ({reason}); rule-based score was {q.get('score')}"
+            out = self._outreach(o, None, facts, why, None, budget, opts)
+        except BudgetExceeded as e:
+            self._fail(o, Step.DRAFT, ReasonCode.BUDGET_EXCEEDED, str(e))
+            out = self._finish(o, None, "DRAFT_NEEDS_HUMAN", f"budget_exceeded: {e}")
+        except LlmError as e:
+            self._fail(o, Step.DRAFT, e.reason, e.detail)
+            out = self._finish(o, None, "DRAFT_NEEDS_HUMAN", f"{e.reason.value}: {e.detail[:200]}")
+        finally:
+            o.cost = budget.snapshot()
+        if out.status_reason and not out.status_reason.startswith("Approved"):
+            out.status_reason = f"Approved by a human ({reason}). " + out.status_reason
+        self._write_report(out)
+        return out
 
     # ------------------------------------------------------------------ helpers
     def _choose_contact(self, o: CompanyOutcome, domain: str, facts) -> ContactChoice:
