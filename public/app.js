@@ -38,10 +38,108 @@
   }
   function setBusy(b) {
     running = b;
-    ['run', 'demo', 'example', 'file'].forEach(id => { const el = $(id); if (el) el.disabled = b; });
-    $('run').textContent = b ? 'Researching…' : 'Research these companies';
+    ['demo', 'example', 'search'].forEach(id => { const el = $(id); if (el) el.disabled = b; });
+    renderQueue();
     const has = Desk.all().some(o => !['QUEUED', 'RUNNING'].includes(o.status));
-    $('dl-json').disabled = b || !has; $('dl-csv').disabled = b || !has;
+    $('results-bar').hidden = !has;
+    $('results-title').textContent = has ? `${Desk.all().length} result${Desk.all().length === 1 ? '' : 's'}` : '';
+    $('dl-json').disabled = b; $('dl-csv').disabled = b;
+  }
+
+  /* ---------- search box: names -> suggestions, links -> chips, file -> chips ---------- */
+  const queue = [];                       // [{raw, domain, label, verified}]
+  let sugg = [], active = -1, seq = 0, timer = null;
+  const looksLikeLink = t => /^https?:\/\//i.test(t) || /\.[a-z]{2,}(\/|$)/i.test(t);
+  function addItem(item, quiet) {
+    const key = (item.domain || item.raw).toLowerCase();
+    if (queue.some(x => (x.domain || x.raw).toLowerCase() === key)) { if (!quiet) notice('warn', `${Desk.esc(key)} is already in the list.`); return 'dup'; }
+    if (queue.length >= (health ? health.max_domains : 10)) { if (!quiet) notice('warn', `Up to ${health ? health.max_domains : 10} companies per batch.`); return 'full'; }
+    queue.push(item); renderQueue(); return 'added';
+  }
+  const normLink = t => t.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split(/[/?#]/)[0].toLowerCase();
+  async function addRaw(text) {
+    const tokens = text.split(/[\n,;\t]+/).map(t => t.trim().replace(/^["']|["']$/g, ''))
+      .filter(t => t && !/^(domains?|websites?|urls?|company|companies|name)$/i.test(t));
+    const c = { added: 0, dup: 0, full: 0, notfound: 0 };
+    for (const t of tokens) {
+      let item;
+      if (looksLikeLink(t)) item = { raw: t, domain: normLink(t), label: null, verified: true };
+      else {                                                     // a company name: look it up
+        const r = await api('/api/resolve?q=' + encodeURIComponent(t), null, 15000);
+        const top = r.ok && (r.data.suggestions || []).find(x => x.verified);
+        if (top) item = { raw: top.domain, domain: top.domain, label: top.name, verified: true };
+        else { item = { raw: t, domain: null, label: null, verified: false }; c.notfound++; }
+      }
+      const res = addItem(item, true); c[res] = (c[res] || 0) + 1;
+    }
+    const parts = [`Added ${c.added}`];
+    if (c.dup) parts.push(`${c.dup} duplicate${c.dup > 1 ? 's' : ''} skipped`);
+    if (c.full) parts.push(`${c.full} over the limit`);
+    if (c.notfound) parts.push(`${c.notfound} not found (kept so you can see how it's handled)`);
+    notice(c.notfound || c.dup || c.full ? 'warn' : 'ok', parts.join(' · ') + '.');
+    return c;
+  }
+  function renderQueue() {
+    const q = $('queue');
+    q.innerHTML = queue.map((x, i) => `<span class="qchip${x.verified ? '' : ' unv'}" title="${x.verified ? '' : 'Unverified: check this is the right company'}">
+        ${x.label ? `<b>${Desk.esc(x.label)}</b>` : ''}<span>${Desk.esc(x.domain || x.raw)}</span>${x.verified ? '' : (x.domain ? '<em>unverified</em>' : '<em>not found</em>')}
+        <button type="button" data-rm="${i}" aria-label="Remove ${Desk.esc(x.domain || x.raw)}"${running ? ' disabled' : ''}>&times;</button></span>`).join('');
+    q.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { queue.splice(+b.dataset.rm, 1); renderQueue(); $('search').focus(); });
+    const run = $('run');
+    run.disabled = running || !queue.length;
+    run.textContent = running ? 'Researching…' : (queue.length ? `Research ${queue.length} compan${queue.length === 1 ? 'y' : 'ies'}` : 'Research companies');
+  }
+  function showSuggest(list, msg) {
+    const ul = $('suggest'); sugg = list; active = list.length ? 0 : -1;
+    if (!list.length && !msg) { ul.hidden = true; $('search').setAttribute('aria-expanded', 'false'); return; }
+    ul.innerHTML = list.map((x, i) => `<li role="option" id="sg-${i}" data-i="${i}" aria-selected="${i === active}">
+        <span class="sg-name">${Desk.esc(x.name)}</span><span class="sg-dom">${Desk.esc(x.domain)}</span>
+        ${x.verified ? `<span class="sg-src">${Desk.esc(x.source === 'link' ? 'link' : 'official site · ' + x.source)}</span>` : '<span class="sg-src unv">unverified guess</span>'}
+        ${x.description ? `<span class="sg-desc">${Desk.esc(x.description)}</span>` : ''}</li>`).join('')
+      + (msg ? `<li class="sg-msg">${Desk.esc(msg)}</li>` : '');
+    ul.hidden = false; $('search').setAttribute('aria-expanded', 'true');
+    ul.querySelectorAll('li[data-i]').forEach(li => li.onmousedown = e => { e.preventDefault(); pick(+li.dataset.i); });
+  }
+  function highlight() {
+    $('suggest').querySelectorAll('li[data-i]').forEach(li => li.setAttribute('aria-selected', String(+li.dataset.i === active)));
+  }
+  function pick(i) {
+    const x = sugg[i]; if (!x) return;
+    addItem({ raw: x.domain, domain: x.domain, label: x.source === 'link' ? null : x.name, verified: !!x.verified });
+    $('search').value = ''; $('sclear').hidden = true; showSuggest([]); $('search').focus();
+  }
+  async function lookup(q) {
+    const my = ++seq;
+    showSuggest([], 'Searching…');
+    const r = await api('/api/resolve?q=' + encodeURIComponent(q), null, 15000);
+    if (my !== seq) return;                                   // a newer keystroke won
+    if (!r.ok) { showSuggest([], (r.data && r.data.message) || 'Lookup failed. Paste the website link instead.'); return; }
+    showSuggest(r.data.suggestions || [], r.data.message || null);
+  }
+  function onSearchInput() {
+    const v = $('search').value; $('sclear').hidden = !v;
+    clearTimeout(timer);
+    const t = v.trim();
+    if (t.length < 2 || looksLikeLink(t)) { showSuggest(looksLikeLink(t) ? [] : [], looksLikeLink(t) ? 'Press Enter to add this link' : null); return; }
+    timer = setTimeout(() => lookup(t), 350);
+  }
+  function onSearchKey(e) {
+    const v = $('search').value.trim();
+    if (e.key === 'ArrowDown' && sugg.length) { e.preventDefault(); active = (active + 1) % sugg.length; highlight(); }
+    else if (e.key === 'ArrowUp' && sugg.length) { e.preventDefault(); active = (active - 1 + sugg.length) % sugg.length; highlight(); }
+    else if (e.key === 'Escape') { showSuggest([]); }
+    else if (e.key === 'Backspace' && !v && queue.length) { queue.pop(); renderQueue(); }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (!v && queue.length) { runBatch(); return; }
+      if (looksLikeLink(v)) { addItem({ raw: v, domain: normLink(v), label: null, verified: true }); $('search').value = ''; $('sclear').hidden = true; showSuggest([]); return; }
+      if (sugg.length && active >= 0) { pick(active); return; }
+      if (v.length >= 2) lookup(v);
+    }
+  }
+  function onSearchPaste(e) {
+    const t = (e.clipboardData || window.clipboardData).getData('text');
+    if (/[\n,;\t]/.test(t.trim())) { e.preventDefault(); addRaw(t); }
   }
 
   async function loadHealth() {
@@ -63,10 +161,12 @@
 
   async function runBatch() {
     if (running) return;
-    const text = $('domains').value;
+    if (!queue.length) { notice('warn', 'Add at least one company first: search a name or paste a link.'); $('search').focus(); return; }
+    const text = queue.map(x => x.domain || x.raw).join('\n');
     notice('', '');
     const p = await api('/api/parse', { text }, 20000);
-    if (!p.ok) { notice('err', Desk.esc(p.data.message || 'Could not read the input.')); $('domains').focus(); return; }
+    if (!p.ok) { notice('err', Desk.esc(p.data.message || 'Could not read the input.')); $('search').focus(); return; }
+    queue.length = 0; renderQueue();
     const { unique, duplicates, invalid, truncated, message } = p.data;
     Desk.reset('Live research');
     invalid.forEach(x => Desk.upsert({ _key: 'invalid:' + x.raw, domain: x.raw, input_raw: x.raw, status: 'INVALID',
@@ -127,7 +227,8 @@
     Desk.setToday(r.data.today);
     r.data.outcomes.forEach((o, i) => { if (o.status === 'DUPLICATE') o._key = 'dup:' + o.input_raw; Desk.upsert(o, i === 0); });
     setBusy(false);
-    notice('ok', 'Offline demo loaded. Open a company on the left to see the verdict, evidence, person and email.');
+    notice('ok', 'Offline demo loaded: fictional companies, zero API calls. Open one on the left.');
+    setBusy(false);
   }
 
   async function sendOne(o) {
@@ -181,19 +282,24 @@
 
   $('run').onclick = runBatch;
   $('demo').onclick = runDemo;
-  $('example').onclick = () => { $('domains').value = EXAMPLE; $('domains').focus(); };
+  $('example').onclick = () => addRaw(EXAMPLE);
+  $('search').addEventListener('input', onSearchInput);
+  $('search').addEventListener('keydown', onSearchKey);
+  $('search').addEventListener('paste', onSearchPaste);
+  $('search').addEventListener('blur', () => setTimeout(() => showSuggest([]), 150));
+  $('sclear').onclick = () => { $('search').value = ''; $('sclear').hidden = true; showSuggest([]); $('search').focus(); };
   $('file').onchange = e => {
     const f = e.target.files[0]; if (!f) return;
     if (f.size > 200000) { notice('err', 'That file is too large (max 200 KB).'); return; }
     const rd = new FileReader();
-    rd.onload = () => { $('domains').value = String(rd.result); notice('ok', `Loaded ${Desk.esc(f.name)}. Press Research.`); };
+    rd.onload = () => { notice('ok', `Reading ${Desk.esc(f.name)}…`); addRaw(String(rd.result)); };
     rd.onerror = () => notice('err', 'Could not read that file.');
     rd.readAsText(f); e.target.value = '';
   };
-  $('domains').addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') runBatch(); });
   $('dl-json').onclick = () => download('sprinto-outreach-results.json', JSON.stringify(Desk.all(), null, 2), 'application/json');
   $('dl-csv').onclick = () => download('sprinto-outreach-summary.csv', csv(), 'text/csv');
 
   Desk.init({ title: 'Ready', outcomes: [] }, { onSend: sendOne, sendLabel: 'Send to my demo inbox', onFollowup: followupOne, onReview: reviewOne });
+  renderQueue();
   loadHealth();
 })();

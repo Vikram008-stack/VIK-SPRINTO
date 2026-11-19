@@ -19,23 +19,36 @@
 
   <section class="intake" aria-labelledby="intake-h">
     <h2 id="intake-h">Which companies should we look at?</h2>
-    <p class="lead">Paste company domains, one per line (or comma separated, or upload a .txt / .csv). For each one the desk reads
-      the public website, scores it against Sprinto's ICP rubric with every point linked to a source, picks the right
-      decision-maker, and drafts a short email built only on evidence it found. Up to <span id="maxd">10</span> per batch.</p>
-    <label for="domains" class="small">Company domains</label>
-    <textarea id="domains" spellcheck="false" placeholder="acme.com&#10;https://www.example-saas.io/&#10;another-company.com"></textarea>
-    <div class="controls">
-      <button class="btn primary" type="button" id="run">Research these companies</button>
-      <button class="btn" type="button" id="example">Load example</button>
-      <label class="file btn" for="file">Upload .txt / .csv<input id="file" type="file" accept=".txt,.csv,text/plain,text/csv" hidden></label>
-      <button class="btn" type="button" id="demo" title="Fictional fixture companies, recorded model output: zero API calls">Run offline demo</button>
-      <span style="flex:1"></span>
-      <button class="btn" type="button" id="dl-json" disabled>Download results (JSON)</button>
-      <button class="btn" type="button" id="dl-csv" disabled>Download summary (CSV)</button>
+    <p class="lead">Search a company by name or paste its website. Add up to <span id="maxd">10</span>, then research them together.</p>
+    <div class="sbox-wrap">
+      <div class="sbox">
+        <svg class="sico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4.2-4.2"/></svg>
+        <input id="search" type="text" autocomplete="off" spellcheck="false"
+               placeholder="Search a company, e.g. Chargebee, or paste chargebee.com"
+               role="combobox" aria-expanded="false" aria-controls="suggest" aria-autocomplete="list" aria-label="Search a company or paste a link">
+        <button class="sclear" id="sclear" type="button" aria-label="Clear" hidden>&times;</button>
+        <label class="supload" for="file" title="Upload a .txt or .csv list">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg>
+          <span>Upload</span><input id="file" type="file" accept=".txt,.csv,text/plain,text/csv" hidden></label>
+      </div>
+      <ul class="suggest" id="suggest" role="listbox" hidden></ul>
+    </div>
+    <div class="queue" id="queue" aria-live="polite"></div>
+    <div class="intake-actions">
+      <button class="btn primary" type="button" id="run" disabled>Research companies</button>
+      <span class="quiet">or <button class="linkbtn" type="button" id="example">try an example list</button>
+        &middot; <button class="linkbtn" type="button" id="demo" title="Fictional companies, recorded model output: zero API calls">run the offline demo</button></span>
     </div>
     <div class="progress" id="progress"><div></div></div>
     <div class="notice" id="notice" role="status"></div>
   </section>
+
+  <div class="results-bar" id="results-bar" hidden>
+    <span class="small" id="results-title"></span>
+    <span style="flex:1"></span>
+    <button class="btn" type="button" id="dl-json">Download results (JSON)</button>
+    <button class="btn" type="button" id="dl-csv">Download summary (CSV)</button>
+  </div>
 
   <section class="cards" id="cards" aria-label="Summary"></section>
   <div class="layout">

@@ -117,3 +117,26 @@ def test_static_ui_served_locally(client):
     r = c.get("/")
     assert r.status_code == 200 and "Sprinto Outreach Desk" in r.text
     assert c.get("/desk.js").status_code == 200
+
+
+def test_resolve_links_short_and_long_queries(client):
+    c, _ = client
+    r = c.get("/api/resolve", params={"q": "https://www.Cal.com/pricing"}).json()
+    assert r["suggestions"][0]["domain"] == "cal.com" and r["suggestions"][0]["source"] == "link"
+    assert c.get("/api/resolve", params={"q": "x"}).json()["suggestions"] == []
+    assert c.get("/api/resolve", params={"q": "a" * 201}).status_code == 400
+
+
+def test_resolve_names_use_wikidata_then_marked_guesses(client, monkeypatch):
+    c, idx = client
+    idx._resolve_cache.clear()
+    monkeypatch.setattr(idx, "_wikidata_lookup", lambda q: [{"name": "Chargebee", "domain": "chargebee.com",
+                                                             "description": "billing", "source": "Wikidata",
+                                                             "verified": True}] if q == "Chargebee" else [])
+    monkeypatch.setattr(idx, "_dns_exists", lambda host: host == "bundle.social")
+    assert c.get("/api/resolve", params={"q": "Chargebee"}).json()["suggestions"][0]["verified"] is True
+    g = c.get("/api/resolve", params={"q": "bundle social"}).json()["suggestions"]
+    assert g == [{"name": "bundle social", "domain": "bundle.social", "source": "guess", "verified": False,
+                  "description": g[0]["description"]}]
+    none = c.get("/api/resolve", params={"q": "zzqq nothing"}).json()
+    assert none["suggestions"] == [] and "Paste its website link" in none["message"]

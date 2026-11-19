@@ -46,6 +46,7 @@
   function sortOut(){ OUT.sort((a,b) => (ORDER[a.status]??9)-(ORDER[b.status]??9) || (((b.qualification||{}).score)||0)-(((a.qualification||{}).score)||0)); }
 
   function renderTop(){
+    document.body.classList.toggle('empty', OUT.length === 0);   // calm first screen: no zero-cards before any run
     const t = D.generated ? new Date(D.generated).toLocaleString() : '';
     const sub = document.getElementById('sub');
     if (sub) sub.textContent = `${D.title || 'Review'} · ${OUT.length} compan${OUT.length===1?'y':'ies'}${t?' · '+t:''}`;

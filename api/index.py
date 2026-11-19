@@ -248,6 +248,99 @@ def send(payload: dict = Body(default={})):
     return res.model_dump(mode="json")
 
 
+WIKIDATA_UA = "SprintoOutreachDesk/1.0 (https://sprinto-outreach-nu.vercel.app; company lookup)"
+_resolve_cache: dict[str, list] = {}
+
+
+def _dns_exists(host: str) -> bool:
+    import socket
+    try:
+        socket.getaddrinfo(host, 443)
+        return True
+    except OSError:
+        return False
+
+
+def _wikidata_lookup(q: str) -> list[dict]:
+    import httpx
+    H = {"User-Agent": WIKIDATA_UA}
+    api = "https://www.wikidata.org/w/api.php"
+    r = httpx.get(api, params={"action": "wbsearchentities", "search": q, "language": "en", "uselang": "en",
+                               "format": "json", "limit": 7, "type": "item"}, headers=H, timeout=6)
+    ids = [x["id"] for x in (r.json().get("search") or [])]
+    if not ids:
+        return []
+    ents = httpx.get(api, params={"action": "wbgetentities", "ids": "|".join(ids), "props": "claims|labels|descriptions",
+                                  "languages": "en|mul", "format": "json"}, headers=H, timeout=6).json()["entities"]
+    out = []
+    for i in ids:
+        e = ents.get(i) or {}
+        sites = [c["mainsnak"].get("datavalue", {}).get("value") for c in e.get("claims", {}).get("P856", [])]
+        sites = [x for x in sites if isinstance(x, str)]
+        if not sites:
+            continue
+        try:
+            dom = normalise_domain(sites[0])
+        except InvalidDomain:
+            continue
+        label = (e.get("labels", {}).get("en") or e.get("labels", {}).get("mul") or {}).get("value") or dom
+        desc = (e.get("descriptions", {}).get("en") or {}).get("value", "")
+        if dom not in [x["domain"] for x in out]:
+            out.append({"name": label, "domain": dom, "description": desc[:90], "source": "Wikidata",
+                        "verified": True})
+    return out[:5]
+
+
+def _guess_domains(q: str) -> list[dict]:
+    from concurrent.futures import ThreadPoolExecutor
+    words = re.findall(r"[a-z0-9]+", q.lower())
+    if not words:
+        return []
+    slug = "".join(words)
+    cands = [f"{slug}.{t}" for t in ("com", "io", "ai", "co", "app")]
+    if len(words) == 2:
+        cands.insert(0, f"{words[0]}.{words[1]}")          # "bundle social" -> bundle.social
+        cands.append(f"{words[0]}-{words[1]}.com")
+    cands = [c for c in dict.fromkeys(cands) if len(c) <= 63]
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        ok = list(ex.map(_dns_exists, cands))
+    return [{"name": q, "domain": c, "description": "Domain exists, but it was not confirmed as this company. "
+                                                     "Check before researching.", "source": "guess",
+             "verified": False} for c, good in zip(cands, ok) if good][:3]
+
+
+@app.get("/api/resolve")
+def resolve(q: str = ""):
+    """Company name or link -> candidate domains. Links are normalised directly; names are looked up on Wikidata
+    (official website property), falling back to DNS-checked guesses that are clearly marked unverified."""
+    q = (q or "").strip()
+    if len(q) < 2:
+        return {"query": q, "suggestions": []}
+    if len(q) > 200:
+        return _err(400, "query_too_long", "Search for a company name or paste one link.")
+    looks_like_domain = bool(re.search(r"\.[a-z]{2,}(/|$)", q.lower())) or q.lower().startswith(("http://", "https://"))
+    if looks_like_domain:
+        try:
+            d = normalise_domain(q)
+            return {"query": q, "suggestions": [{"name": d, "domain": d, "description": "Link you entered",
+                                                 "source": "link", "verified": True}]}
+        except InvalidDomain as e:
+            return {"query": q, "suggestions": [], "message": str(e)}
+    key = q.lower()
+    if key in _resolve_cache:
+        return {"query": q, "suggestions": _resolve_cache[key], "cached": True}
+    suggestions: list[dict] = []
+    try:
+        suggestions = _wikidata_lookup(q)
+    except Exception:
+        suggestions = []
+    if not suggestions:
+        suggestions = _guess_domains(q)
+    _resolve_cache[key] = suggestions
+    msg = None if suggestions else "No company found. Paste its website link instead."
+    return {"query": q, "suggestions": suggestions, "message": msg}
+
+
 REVIEWABLE = {"NEEDS_RESEARCH", "INSUFFICIENT_DATA", "REJECTED", "NO_CONTACT_FOUND", "DRAFT_NEEDS_HUMAN"}
 
 
